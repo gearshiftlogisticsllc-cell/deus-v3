@@ -620,13 +620,13 @@ function deleteSMTP(name) {
 function importContacts() {
   const file = document.getElementById('import-file').files[0];
   if (!file) { alert('Select a file first'); return; }
-  // Upload file as text and send to import endpoint
   const reader = new FileReader();
   reader.onload = function(e) {
     log('out-log', 'Importing '+file.name+'...', 'info');
+    const b64 = btoa(unescape(encodeURIComponent(e.target.result)));
     fetch(API+'/api/leads/import', {
       method:'POST', headers:{'Content-Type':'application/json'},
-      body: JSON.stringify({filepath: file.name, niche: document.getElementById('import-niche').value})
+      body: JSON.stringify({filename: file.name, content_b64: b64, niche: document.getElementById('import-niche').value})
     }).then(r=>r.json()).then(d=>{
       if (d.success) log('out-log', 'Imported '+d.imported+' contacts ('+d.skipped_duplicates+' dupes skipped).', 'ok');
       else log('out-log', 'Import error: '+(d.error||'Unknown'), 'err');

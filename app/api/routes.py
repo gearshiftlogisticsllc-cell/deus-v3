@@ -417,15 +417,96 @@ def lead_scout_search(request: dict):
 
 @router.post("/api/leads/import")
 def import_contacts(request: dict):
+    import base64
+    filename = request.get("filename", "")
+    content_b64 = request.get("content_b64", "")
     filepath = request.get("filepath", "")
     niche = request.get("niche", "")
-    if not filepath:
-        raise HTTPException(status_code=400, detail="filepath is required")
+
+    if not content_b64 and not filepath:
+        raise HTTPException(status_code=400, detail="filename + content_b64 or filepath is required")
 
     try:
-        from contact_importer import import_contacts as do_import
-        result = do_import(filepath, default_niche=niche)
-        return {"success": True, **result}
+        if content_b64:
+            # Decode base64 content and parse in-memory
+            from contact_importer import parse_csv_text, parse_plain_lines, parse_docx_tables, parse_pdf
+            ext = os.path.splitext(filename)[1].lower()
+            file_bytes = base64.b64decode(content_b64)
+
+            if ext == ".csv":
+                text = file_bytes.decode("utf-8-sig", errors="ignore")
+                new_leads = parse_csv_text(text)
+            elif ext == ".txt":
+                text = file_bytes.decode("utf-8", errors="ignore")
+                new_leads = parse_plain_lines(text)
+            elif ext == ".docx":
+                import tempfile
+                with tempfile.NamedTemporaryFile(suffix=".docx", delete=False) as tmp:
+                    tmp.write(file_bytes)
+                    tmp_path = tmp.name
+                try:
+                    new_leads = parse_docx_tables(tmp_path)
+                finally:
+                    os.unlink(tmp_path)
+            elif ext == ".pdf":
+                import tempfile
+                with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False) as tmp:
+                    tmp.write(file_bytes)
+                    tmp_path = tmp.name
+                try:
+                    new_leads = parse_pdf(tmp_path)
+                finally:
+                    os.unlink(tmp_path)
+            else:
+                raise ValueError(f"Unsupported file type: {ext}")
+
+            # De-dupe
+            seen = set()
+            deduped = []
+            for lead in new_leads:
+                key = lead.get("business_email") or lead.get("phone")
+                if key and key not in seen:
+                    seen.add(key)
+                    deduped.append(lead)
+
+            # Merge into leads.json
+            leads_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "leads.json")
+            existing = []
+            try:
+                with open(leads_path) as f:
+                    existing = json.load(f)
+            except (FileNotFoundError, json.JSONDecodeError):
+                existing = []
+
+            existing_keys = {l.get("business_email") or l.get("phone") for l in existing if isinstance(l, dict)}
+            imported_count = 0
+            skipped_count = 0
+            for lead in deduped:
+                key = lead.get("business_email") or lead.get("phone")
+                if key in existing_keys:
+                    skipped_count += 1
+                    continue
+                lead.setdefault("niche", niche)
+                lead.setdefault("preferred_channel", "email")
+                lead["status"] = lead.get("status", "new")
+                lead["source"] = "manual_import"
+                lead["outreach_ready"] = bool(lead.get("business_email"))
+                lead["needs_human"] = not lead.get("business_email")
+                if lead["needs_human"]:
+                    lead["needs_human_reason"] = "Imported contact has no email — needs a call."
+                existing.append(lead)
+                existing_keys.add(key)
+                imported_count += 1
+
+            with open(leads_path, "w") as f:
+                json.dump(existing, f, indent=2)
+
+            return {"success": True, "imported": imported_count, "skipped_duplicates": skipped_count, "total_in_file": len(deduped)}
+        else:
+            # Fallback: file path on server
+            from contact_importer import import_contacts as do_import
+            result = do_import(filepath, default_niche=niche)
+            return {"success": True, **result}
     except Exception as e:
         return {"success": False, "error": str(e)}
 
