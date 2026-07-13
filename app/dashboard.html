@@ -1,0 +1,570 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>DEUS 3.0 - Control Panel</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+:root{--bg:#0A0F1C;--panel:#141B2B;--panel2:#1A2338;--border:#243252;--cyan:#5EEAFF;--violet:#9B8CFF;--green:#57F0B3;--amber:#FFCB77;--red:#FF6B81;--text:#EAF2FF;--muted:#7D93B8;--glass:#1E2A44;--glassb:#3E5B8C}
+body{background:var(--bg);color:var(--text);font-family:'Segoe UI',system-ui,sans-serif;height:100vh;overflow:hidden}
+input,select,textarea{background:var(--panel2);color:var(--text);border:1px solid var(--border);border-radius:4px;padding:6px 10px;font-size:13px;font-family:inherit}
+input:focus,select:focus,textarea:focus{outline:none;border-color:var(--cyan)}
+button,.btn{background:var(--cyan);color:var(--bg);border:none;padding:8px 16px;border-radius:6px;font-size:13px;font-weight:700;cursor:pointer;transition:opacity .2s}
+button:hover,.btn:hover{opacity:.85}
+.btn-violet{background:var(--violet)}
+.btn-green{background:var(--green)}
+.btn-red{background:var(--red)}
+.btn-muted{background:var(--muted)}
+label{font-size:12px;color:var(--muted);text-transform:uppercase;letter-spacing:1px}
+.pill{font-size:11px;padding:2px 8px;border-radius:4px;font-weight:700;display:inline-block}
+.pill-ok{background:rgba(87,240,179,.15);color:var(--green)}
+.pill-err{background:rgba(255,107,129,.15);color:var(--red)}
+.pill-off{background:rgba(125,147,184,.15);color:var(--muted)}
+.pill-run{background:rgba(94,234,255,.15);color:var(--cyan)}
+
+.topbar{background:#111;border-bottom:1px solid rgba(94,234,255,.2);padding:10px 20px;display:flex;align-items:center;gap:12px;height:48px}
+.topbar h1{font-size:18px;color:var(--cyan);letter-spacing:2px}
+.topbar .badge{background:var(--cyan);color:var(--bg);font-size:10px;padding:2px 6px;border-radius:3px;font-weight:700}
+.topbar .right{margin-left:auto;display:flex;gap:14px;align-items:center;font-size:12px;color:var(--muted)}
+.topbar .dot{width:7px;height:7px;border-radius:50%;background:var(--green);display:inline-block;animation:pulse 2s infinite}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.3}}
+.stats-bar{background:var(--panel);border-bottom:1px solid var(--border);padding:6px 20px;display:flex;gap:24px;height:38px;align-items:center}
+.stat-chip{font-size:12px;color:var(--muted)}
+.stat-chip b{font-size:16px;margin-right:4px}
+.stat-chip .lc{color:var(--cyan)}.stat-chip .vc{color:var(--violet)}.stat-chip .ac{color:var(--amber)}.stat-chip .gc{color:var(--green)}
+
+.main{display:flex;height:calc(100vh - 86px)}
+.sidebar{width:200px;background:var(--panel);border-right:1px solid var(--border);overflow-y:auto;flex-shrink:0}
+.sidebar .nav-item{padding:10px 14px;cursor:pointer;font-size:13px;border-left:3px solid transparent;transition:all .15s;display:flex;align-items:center;gap:8px}
+.sidebar .nav-item:hover{background:var(--panel2);border-left-color:var(--violet)}
+.sidebar .nav-item.active{background:var(--glass);border-left-color:var(--cyan);color:var(--cyan)}
+.sidebar .nav-item .dot-s{width:6px;height:6px;border-radius:50%;background:var(--muted);flex-shrink:0}
+.sidebar .nav-item .dot-s.ok{background:var(--green)}.sidebar .nav-item .dot-s.err{background:var(--red)}.sidebar .nav-item .dot-s.run{background:var(--cyan)}
+
+.content{flex:1;overflow-y:auto;padding:20px}
+.panel{display:none}.panel.active{display:block}
+.panel-title{font-size:20px;font-weight:700;margin-bottom:4px}
+.panel-desc{font-size:12px;color:var(--muted);margin-bottom:16px}
+.section{background:var(--panel);border:1px solid var(--border);border-radius:8px;padding:16px;margin-bottom:16px}
+.section h3{font-size:13px;color:var(--cyan);margin-bottom:10px;text-transform:uppercase;letter-spacing:1px}
+.row{display:flex;gap:10px;align-items:center;margin-bottom:8px;flex-wrap:wrap}
+.field{display:flex;flex-direction:column;gap:4px;flex:1;min-width:150px}
+.field label{font-size:11px}
+.field input,.field select,.field textarea{width:100%}
+.log{background:var(--bg);border:1px solid var(--border);border-radius:6px;padding:10px;font-family:Consolas,monospace;font-size:12px;max-height:250px;overflow-y:auto;white-space:pre-wrap;line-height:1.5}
+.log .ok{color:var(--green)}.log .err{color:var(--red)}.log .info{color:var(--cyan)}.log .warn{color:var(--amber)}
+table{width:100%;border-collapse:collapse;font-size:12px}
+th{background:var(--glass);color:var(--cyan);padding:8px;text-align:left;font-weight:700;position:sticky;top:0}
+td{padding:6px 8px;border-bottom:1px solid var(--border)}
+tr:hover td{background:var(--panel2)}
+.tbl-wrap{max-height:350px;overflow:auto;border:1px solid var(--border);border-radius:6px}
+.console-input{display:flex;gap:8px;margin-bottom:8px}
+.console-input input{flex:1;font-family:Consolas,monospace}
+.spinner{display:inline-block;width:14px;height:14px;border:2px solid var(--border);border-top-color:var(--cyan);border-radius:50%;animation:spin .6s linear infinite}
+@keyframes spin{to{transform:rotate(360deg)}}
+</style>
+</head>
+<body>
+
+<div class="topbar">
+  <h1>DEUS 3.0</h1>
+  <span class="badge">LIVE</span>
+  <div class="right">
+    <span><span class="dot"></span> Online</span>
+    <span>v3.0.0</span>
+  </div>
+</div>
+
+<div class="stats-bar">
+  <div class="stat-chip"><b class="lc" id="s-leads">0</b> Leads</div>
+  <div class="stat-chip"><b class="vc" id="s-sent">0</b> Sent</div>
+  <div class="stat-chip"><b class="ac" id="s-appts">0</b> Appts</div>
+  <div class="stat-chip"><b class="gc" id="s-deals">0</b> Deals</div>
+  <div style="margin-left:auto"><button class="btn-muted" onclick="refreshStats()" style="padding:4px 10px;font-size:11px">Refresh</button></div>
+</div>
+
+<div class="main">
+  <div class="sidebar" id="sidebar">
+    <div class="nav-item active" onclick="showPanel('scout')" id="nav-scout"><span class="dot-s ok"></span> Lead Scout</div>
+    <div class="nav-item" onclick="showPanel('outreach')" id="nav-outreach"><span class="dot-s ok"></span> Outreach</div>
+    <div class="nav-item" onclick="showPanel('followup')" id="nav-followup"><span class="dot-s"></span> Followup</div>
+    <div class="nav-item" onclick="showPanel('appointment')" id="nav-appointment"><span class="dot-s"></span> Appointment</div>
+    <div class="nav-item" onclick="showPanel('closer')" id="nav-closer"><span class="dot-s"></span> Deal Closer</div>
+    <div class="nav-item" onclick="showPanel('report')" id="nav-report"><span class="dot-s"></span> Report</div>
+    <div class="nav-item" onclick="showPanel('bridge')" id="nav-bridge"><span class="dot-s"></span> DEUS Bridge</div>
+    <div class="nav-item" onclick="showPanel('pipelines')" id="nav-pipelines"><span class="dot-s"></span> Pipelines</div>
+    <div class="nav-item" onclick="showPanel('apikeys')" id="nav-apikeys"><span class="dot-s"></span> API Keys</div>
+  </div>
+
+  <div class="content">
+
+    <!-- LEAD SCOUT -->
+    <div class="panel active" id="panel-scout">
+      <div class="panel-title">Lead Scout Agent</div>
+      <div class="panel-desc">Finds business leads via DuckDuckGo, Serper, or BrightData. Score-ranks with AI.</div>
+      <div class="section">
+        <h3>Search Configuration</h3>
+        <div class="row">
+          <div class="field" style="flex:3">
+            <label>Niche / Query</label>
+            <input type="text" id="scout-niche" placeholder="e.g. dental clinics in Lahore | hvac companies virginia">
+          </div>
+        </div>
+        <div class="row">
+          <div class="field">
+            <label>BrightData API Key (optional)</label>
+            <input type="password" id="scout-bdkey" placeholder="Auto-uses free DDG + web scrape if blank">
+          </div>
+          <div class="field" style="flex:.5">
+            <label>Target Leads</label>
+            <input type="number" id="scout-target" value="50" min="10" max="400">
+          </div>
+          <div class="field" style="flex:.5">
+            <label>Use Serper</label>
+            <select id="scout-serper"><option value="0">No</option><option value="1">Yes</option></select>
+          </div>
+        </div>
+        <div class="row">
+          <button onclick="runScout()" id="scout-btn">Find Leads</button>
+          <button class="btn-green" onclick="exportLeadsCSV()">Export CSV</button>
+          <span id="scout-status"></span>
+        </div>
+      </div>
+      <div class="section">
+        <h3>Results <span id="scout-count" style="color:var(--muted);font-weight:400"></span></h3>
+        <div class="tbl-wrap">
+          <table><thead><tr>
+            <th>Score</th><th>Business</th><th>Owner</th><th>Phone</th><th>Email</th><th>Website</th><th>Location</th><th>Source</th>
+          </tr></thead><tbody id="scout-tbody"></tbody></table>
+        </div>
+      </div>
+      <div class="section"><h3>Activity Log</h3><div class="log" id="scout-log"></div></div>
+    </div>
+
+    <!-- OUTREACH -->
+    <div class="panel" id="panel-outreach">
+      <div class="panel-title">Outreach Agent</div>
+      <div class="panel-desc">Sends first-contact emails. Configure tone, SMTP accounts, and import contact lists.</div>
+      <div class="section">
+        <h3>Run Outreach</h3>
+        <div class="row">
+          <div class="field" style="flex:.5">
+            <label>Channel</label>
+            <select id="out-channel"><option>auto</option><option>email</option><option>linkedin</option><option>instagram</option><option>facebook</option><option>phone/sms</option></select>
+          </div>
+          <button onclick="runOutreach()" id="out-btn">Run Outreach</button>
+        </div>
+      </div>
+      <div style="display:flex;gap:0;border:1px solid var(--border);border-radius:8px;overflow:hidden;margin-bottom:16px">
+        <div onclick="showOutTab('style')" class="out-tab active" id="outtab-style" style="padding:10px 16px;cursor:pointer;font-size:13px;background:var(--panel)">Email Style</div>
+        <div onclick="showOutTab('smtp')" class="out-tab" id="outtab-smtp" style="padding:10px 16px;cursor:pointer;font-size:13px;background:var(--bg);border-left:1px solid var(--border)">SMTP Accounts</div>
+        <div onclick="showOutTab('import')" class="out-tab" id="outtab-import" style="padding:10px 16px;cursor:pointer;font-size:13px;background:var(--bg);border-left:1px solid var(--border)">Import Contacts</div>
+      </div>
+      <div id="outsub-style" class="outsub">
+        <div class="section">
+          <h3>Email Style Configuration</h3>
+          <div class="row">
+            <div class="field"><label>Tone</label><select id="out-tone"><option>professional</option><option>friendly</option><option>direct</option><option>formal</option></select></div>
+            <div class="field" style="flex:.5"><label>Max Words</label><input type="number" id="out-words" value="150"></div>
+          </div>
+          <div class="row"><div class="field"><label>Subject Template</label><input type="text" id="out-subject" placeholder="Quick question about your business, {business_name}"></div></div>
+          <div class="row"><div class="field"><label>Call to Action</label><input type="text" id="out-cta" placeholder="Would you be open to a quick 15-minute call this week?"></div></div>
+          <div class="row"><div class="field"><label>Signature</label><textarea id="out-sig" rows="2"></textarea></div></div>
+          <div class="row" style="margin-top:4px">
+            <label><input type="checkbox" id="out-use-tmpl"> Use custom template (bypass AI)</label>
+          </div>
+          <div class="row"><div class="field"><label>Custom Template ({business_name}, {niche}, {services_offered})</label><textarea id="out-tmpl" rows="4"></textarea></div></div>
+          <button class="btn-green" onclick="saveOutreachConfig()">Save Style</button>
+        </div>
+      </div>
+      <div id="outsub-smtp" class="outsub" style="display:none">
+        <div class="section">
+          <h3>SMTP Profiles</h3>
+          <div id="smtp-list" style="margin-bottom:12px"></div>
+          <div class="row">
+            <div class="field"><label>Profile Name</label><input type="text" id="smtp-name"></div>
+            <div class="field"><label>SMTP Host</label><input type="text" id="smtp-host" value="smtp.gmail.com"></div>
+            <div class="field" style="flex:.5"><label>Port</label><input type="number" id="smtp-port" value="465"></div>
+          </div>
+          <div class="row">
+            <div class="field"><label>Email</label><input type="email" id="smtp-email"></div>
+            <div class="field"><label>Password</label><input type="password" id="smtp-pass"></div>
+          </div>
+          <div class="row"><label><input type="checkbox" id="smtp-default"> Set as default</label></div>
+          <div class="row">
+            <button class="btn-green" onclick="saveSMTP()">Save Profile</button>
+          </div>
+        </div>
+      </div>
+      <div id="outsub-import" class="outsub" style="display:none">
+        <div class="section">
+          <h3>Import Contacts</h3>
+          <p style="font-size:12px;color:var(--muted);margin-bottom:10px">Import your own client/contact list (CSV, TXT). Contacts merge into leads.json.</p>
+          <div class="row">
+            <div class="field" style="flex:1"><label>Default Niche</label><input type="text" id="import-niche" placeholder="e.g. dental clinics"></div>
+          </div>
+          <div class="row">
+            <input type="file" id="import-file" accept=".csv,.txt" style="font-size:12px">
+            <button onclick="importContacts()">Import</button>
+          </div>
+        </div>
+      </div>
+      <div class="section"><h3>Activity Log</h3><div class="log" id="out-log"></div></div>
+    </div>
+
+    <!-- FOLLOWUP -->
+    <div class="panel" id="panel-followup">
+      <div class="panel-title">Followup Agent</div>
+      <div class="panel-desc">Re-contacts leads that haven't responded within 48 hours.</div>
+      <div class="section">
+        <button onclick="runAgent('followup','FollowupAgent')" id="fu-btn">Run Followup</button>
+        <div class="log" id="fu-log" style="margin-top:12px"></div>
+      </div>
+    </div>
+
+    <!-- APPOINTMENT -->
+    <div class="panel" id="panel-appointment">
+      <div class="panel-title">Appointment Agent</div>
+      <div class="panel-desc">Reads Calendly and books the best available slot.</div>
+      <div class="section">
+        <button onclick="runAgent('appointment','AppointmentAgent')" id="ap-btn">Run Appointment Check</button>
+        <div class="log" id="ap-log" style="margin-top:12px"></div>
+      </div>
+    </div>
+
+    <!-- DEAL CLOSER -->
+    <div class="panel" id="panel-closer">
+      <div class="panel-title">Deal Closer Agent</div>
+      <div class="panel-desc">Sends closing messages after an appointment occurs.</div>
+      <div class="section">
+        <button onclick="runAgent('closer','DealCloserAgent')" id="dc-btn">Run Deal Closer</button>
+        <div class="log" id="dc-log" style="margin-top:12px"></div>
+      </div>
+    </div>
+
+    <!-- REPORT -->
+    <div class="panel" id="panel-report">
+      <div class="panel-title">Report Agent</div>
+      <div class="panel-desc">Builds and emails a daily pipeline summary.</div>
+      <div class="section">
+        <button onclick="runAgent('report','ReportAgent')" id="rp-btn">Generate Report</button>
+        <div class="log" id="rp-log" style="margin-top:12px"></div>
+      </div>
+    </div>
+
+    <!-- DEUS BRIDGE -->
+    <div class="panel" id="panel-bridge">
+      <div class="panel-title">DEUS Bridge</div>
+      <div class="panel-desc">Routes free-form commands to the Groq/Gemini brain.</div>
+      <div class="section">
+        <div class="console-input">
+          <input type="text" id="bridge-cmd" placeholder="e.g. find dental clinics in Virginia and send them an email" onkeydown="if(event.key==='Enter')runBridge()">
+          <button onclick="runBridge()">Send</button>
+        </div>
+        <div class="log" id="bridge-log" style="max-height:400px"></div>
+      </div>
+    </div>
+
+    <!-- PIPELINES -->
+    <div class="panel" id="panel-pipelines">
+      <div class="panel-title">Pipelines</div>
+      <div class="panel-desc">Run multi-agent pipelines or configure your own.</div>
+      <div class="section" id="pipeline-list"></div>
+    </div>
+
+    <!-- API KEYS -->
+    <div class="panel" id="panel-apikeys">
+      <div class="panel-title">API Keys</div>
+      <div class="panel-desc">Manage API keys for all agents. Keys are saved to .env.</div>
+      <div class="section" id="apikey-list"></div>
+    </div>
+
+  </div>
+</div>
+
+<script>
+const API = '';
+
+function showPanel(name) {
+  document.querySelectorAll('.panel').forEach(p => p.classList.remove('active'));
+  document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
+  document.getElementById('panel-'+name).classList.add('active');
+  document.getElementById('nav-'+name).classList.add('active');
+}
+
+function log(el, text, tag) {
+  const d = document.getElementById(el);
+  if (!d) return;
+  if (tag) text = '<span class="'+tag+'">'+text+'</span>';
+  d.innerHTML += text + '\n';
+  d.scrollTop = d.scrollHeight;
+}
+function clearLog(el) { document.getElementById(el).innerHTML = ''; }
+
+function setBtn(id, loading) {
+  const b = document.getElementById(id);
+  if (!b) return;
+  if (loading) { b.disabled = true; b.innerHTML = '<span class="spinner"></span> Running...'; }
+  else { b.disabled = false; b.innerHTML = b.getAttribute('data-original') || b.textContent; }
+}
+
+// Stats
+function refreshStats() {
+  fetch(API+'/api/stats').then(r=>r.json()).then(d=>{
+    document.getElementById('s-leads').textContent = d.leads||0;
+    document.getElementById('s-sent').textContent = d.outreach||0;
+    document.getElementById('s-appts').textContent = d.appointments||0;
+    document.getElementById('s-deals').textContent = d.deals||0;
+  });
+}
+setInterval(refreshStats, 10000);
+refreshStats();
+
+// Lead Scout
+let scoutResults = [];
+function runScout() {
+  const niche = document.getElementById('scout-niche').value.trim();
+  if (!niche) { alert('Enter a niche to search for'); return; }
+  clearLog('scout-log');
+  log('scout-log', 'Starting lead scout for: '+niche, 'info');
+  setBtn('scout-btn', true);
+  document.getElementById('scout-status').innerHTML = '<span class="spinner"></span>';
+
+  fetch(API+'/api/lead-scout/search', {
+    method: 'POST', headers: {'Content-Type':'application/json'},
+    body: JSON.stringify({
+      niche: niche,
+      target: parseInt(document.getElementById('scout-target').value)||50,
+      use_serper: document.getElementById('scout-serper').value==='1',
+      brightdata_key: document.getElementById('scout-bdkey').value.trim(),
+    })
+  }).then(r=>r.json()).then(d=>{
+    setBtn('scout-btn', false);
+    document.getElementById('scout-status').innerHTML = '';
+    if (d.success) {
+      scoutResults = d.leads || [];
+      renderScoutTable(scoutResults);
+      log('scout-log', 'Done. '+d.total+' leads found. '+d.new_saved+' new saved. ('+d.skipped+' skipped)', 'ok');
+      refreshStats();
+    } else {
+      log('scout-log', 'ERROR: '+(d.error||'Unknown error'), 'err');
+    }
+  }).catch(e=>{
+    setBtn('scout-btn', false);
+    document.getElementById('scout-status').innerHTML = '';
+    log('scout-log', 'ERROR: '+e, 'err');
+  });
+}
+
+function renderScoutTable(leads) {
+  const tb = document.getElementById('scout-tbody');
+  tb.innerHTML = '';
+  leads.forEach(l => {
+    tb.innerHTML += '<tr><td>'+(l.score||'')+'</td><td>'+(l.business_name||'')+'</td><td>'+(l.owner_name||'')+'</td><td>'+(l.phone||'')+'</td><td>'+(l.business_email||'')+'</td><td>'+(l.website||'')+'</td><td>'+(l.location||'')+'</td><td>'+(l.source||'')+'</td></tr>';
+  });
+  document.getElementById('scout-count').textContent = leads.length+' leads';
+}
+
+function exportLeadsCSV() {
+  fetch(API+'/api/leads/export').then(r=>{
+    if(!r.ok) throw new Error('No leads');
+    return r.blob();
+  }).then(b=>{
+    const url = URL.createObjectURL(b);
+    const a = document.createElement('a'); a.href=url; a.download='leads_export.csv'; a.click();
+    log('scout-log', 'CSV exported.', 'ok');
+  }).catch(e=>{ log('scout-log', 'Export failed: '+e, 'err'); });
+}
+
+// Outreach
+function showOutTab(name) {
+  document.querySelectorAll('.outsub').forEach(s => s.style.display='none');
+  document.querySelectorAll('.out-tab').forEach(t => { t.style.background='var(--bg)'; t.classList.remove('active'); });
+  document.getElementById('outsub-'+name).style.display='block';
+  const tab = document.getElementById('outtab-'+name);
+  tab.style.background='var(--panel)'; tab.classList.add('active');
+}
+
+function runOutreach() {
+  clearLog('out-log');
+  log('out-log', 'Starting outreach (channel: '+document.getElementById('out-channel').value+')...', 'info');
+  setBtn('out-btn', true);
+  fetch(API+'/api/agents/OutreachAgent/run', {
+    method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({kwargs:{channel:document.getElementById('out-channel').value}})
+  }).then(r=>r.json()).then(d=>{
+    setBtn('out-btn', false);
+    log('out-log', d.message, d.success?'ok':'err');
+    refreshStats();
+  }).catch(e=>{ setBtn('out-btn', false); log('out-log', 'ERROR: '+e, 'err'); });
+}
+
+// Load outreach config
+fetch(API+'/api/outreach/config').then(r=>r.json()).then(d=>{
+  document.getElementById('out-tone').value = d.tone||'professional';
+  document.getElementById('out-words').value = d.max_words||150;
+  document.getElementById('out-subject').value = d.subject_template||'';
+  document.getElementById('out-cta').value = d.call_to_action||'';
+  document.getElementById('out-sig').value = d.signature||'';
+  document.getElementById('out-use-tmpl').checked = d.use_custom_template||false;
+  document.getElementById('out-tmpl').value = d.custom_template||'';
+});
+
+function saveOutreachConfig() {
+  fetch(API+'/api/outreach/config', {
+    method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({
+      tone: document.getElementById('out-tone').value,
+      max_words: parseInt(document.getElementById('out-words').value)||150,
+      subject_template: document.getElementById('out-subject').value,
+      call_to_action: document.getElementById('out-cta').value,
+      signature: document.getElementById('out-sig').value,
+      use_custom_template: document.getElementById('out-use-tmpl').checked,
+      custom_template: document.getElementById('out-tmpl').value,
+    })
+  }).then(r=>r.json()).then(d=>{ log('out-log', 'Email style saved.', 'ok'); });
+}
+
+// SMTP
+function loadSMTP() {
+  fetch(API+'/api/smtp/profiles').then(r=>r.json()).then(profiles=>{
+    const el = document.getElementById('smtp-list');
+    if (!profiles.length) { el.innerHTML='<div style="font-size:12px;color:var(--muted)">No profiles configured.</div>'; return; }
+    el.innerHTML = profiles.map(p =>
+      '<div style="display:flex;justify-content:space-between;align-items:center;padding:8px;border-bottom:1px solid var(--border);font-size:13px">'
+      +'<span>'+p.profile_name+' ('+p.smtp_email+')'+(p.is_default?' <span class="pill pill-ok">default</span>':'')+'</span>'
+      +'<button class="btn-red" onclick="deleteSMTP(\''+p.profile_name+'\')" style="padding:2px 8px;font-size:11px">Delete</button>'
+      +'</div>'
+    ).join('');
+  });
+}
+loadSMTP();
+
+function saveSMTP() {
+  fetch(API+'/api/smtp/profiles', {
+    method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({
+      profile_name: document.getElementById('smtp-name').value,
+      smtp_host: document.getElementById('smtp-host').value,
+      smtp_port: parseInt(document.getElementById('smtp-port').value)||465,
+      smtp_email: document.getElementById('smtp-email').value,
+      smtp_password: document.getElementById('smtp-pass').value,
+      is_default: document.getElementById('smtp-default').checked,
+    })
+  }).then(r=>r.json()).then(d=>{ loadSMTP(); log('out-log', 'SMTP profile saved.', 'ok'); });
+}
+
+function deleteSMTP(name) {
+  if (!confirm('Delete profile '+name+'?')) return;
+  fetch(API+'/api/smtp/profiles/'+encodeURIComponent(name), {method:'DELETE'})
+    .then(r=>r.json()).then(()=>{ loadSMTP(); log('out-log', 'SMTP profile deleted.', 'ok'); });
+}
+
+// Import contacts
+function importContacts() {
+  const file = document.getElementById('import-file').files[0];
+  if (!file) { alert('Select a file first'); return; }
+  // Upload file as text and send to import endpoint
+  const reader = new FileReader();
+  reader.onload = function(e) {
+    log('out-log', 'Importing '+file.name+'...', 'info');
+    fetch(API+'/api/leads/import', {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({filepath: file.name, niche: document.getElementById('import-niche').value})
+    }).then(r=>r.json()).then(d=>{
+      if (d.success) log('out-log', 'Imported '+d.imported+' contacts ('+d.skipped_duplicates+' dupes skipped).', 'ok');
+      else log('out-log', 'Import error: '+(d.error||'Unknown'), 'err');
+      refreshStats();
+    });
+  };
+  reader.readAsText(file);
+}
+
+// Generic agent runner
+function runAgent(panel, agentName) {
+  const logId = {followup:'fu',appointment:'ap',closer:'dc',report:'rp'}[panel];
+  const btnId = logId+'-btn';
+  clearLog(logId+'-log');
+  log(logId+'-log', 'Running '+agentName+'...', 'info');
+  setBtn(btnId, true);
+
+  fetch(API+'/api/agents/'+agentName+'/run', {
+    method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({kwargs:{}})
+  }).then(r=>r.json()).then(d=>{
+    setBtn(btnId, false);
+    log(logId+'-log', d.message, d.success?'ok':'err');
+    if (d.data) log(logId+'-log', JSON.stringify(d.data,null,2));
+    refreshStats();
+  }).catch(e=>{ setBtn(btnId, false); log(logId+'-log', 'ERROR: '+e, 'err'); });
+}
+
+// Bridge
+function runBridge() {
+  const cmd = document.getElementById('bridge-cmd').value.trim();
+  if (!cmd) return;
+  document.getElementById('bridge-cmd').value = '';
+  log('bridge-log', '> '+cmd, 'info');
+  fetch(API+'/api/command', {
+    method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({command:cmd})
+  }).then(r=>r.json()).then(d=>{
+    log('bridge-log', d.message, d.success?'ok':'err');
+  }).catch(e=>{ log('bridge-log', 'ERROR: '+e, 'err'); });
+}
+
+// Pipelines
+fetch(API+'/api/pipelines').then(r=>r.json()).then(pipelines=>{
+  const el = document.getElementById('pipeline-list');
+  if (!pipelines.length) { el.innerHTML='<div style="color:var(--muted)">No pipelines configured.</div>'; return; }
+  el.innerHTML = pipelines.map(p =>
+    '<div style="display:flex;justify-content:space-between;align-items:center;padding:12px;border-bottom:1px solid var(--border)">'
+    +'<div><b style="color:var(--cyan)">'+p.display_name+'</b><div style="font-size:11px;color:var(--muted)">'+p.description+'</div>'
+    +'<div style="font-size:11px;color:var(--muted);margin-top:2px">Steps: '+p.steps.join(' → ')+'</div></div>'
+    +'<button onclick="runPipeline(\''+p.name+'\')" id="pipe-'+p.name+'">Run</button></div>'
+  ).join('');
+});
+
+function runPipeline(name) {
+  const btn = document.getElementById('pipe-'+name);
+  if (btn) { btn.disabled=true; btn.innerHTML='<span class="spinner"></span>'; }
+  fetch(API+'/api/pipelines/'+name+'/run', {
+    method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({kwargs:{}})
+  }).then(r=>r.json()).then(d=>{
+    if (btn) { btn.disabled=false; btn.textContent='Run'; }
+    alert(d.message);
+    refreshStats();
+  }).catch(e=>{ if(btn){btn.disabled=false;btn.textContent='Run';} alert('Error: '+e); });
+}
+
+// API Keys
+fetch(API+'/api/config/keys').then(r=>r.json()).then(grouped=>{
+  const el = document.getElementById('apikey-list');
+  let html = '';
+  for (const [agent, keys] of Object.entries(grouped)) {
+    html += '<div style="color:var(--cyan);font-weight:700;margin-top:12px">'+agent+'</div>';
+    keys.forEach(k => {
+      html += '<div style="display:flex;justify-content:space-between;align-items:center;padding:8px;border-bottom:1px solid var(--border);font-size:12px">'
+        +'<div><b>'+k.env_var+'</b>'+(k.required?'':' <span style="color:var(--muted)">(optional)</span>')+'<br><span style="color:var(--muted)">'+(k.value_set?k.value_masked:'(not set)')+'</span></div>'
+        +'<button class="btn-violet" onclick="editKey(\''+k.env_var+'\')" style="padding:2px 8px;font-size:11px">Edit</button></div>';
+    });
+  }
+  el.innerHTML = html;
+});
+
+function editKey(envVar) {
+  const val = prompt('Set value for '+envVar+':');
+  if (val===null) return;
+  fetch(API+'/api/config/keys/'+encodeURIComponent(envVar), {
+    method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({value:val})
+  }).then(r=>r.json()).then(()=>{ alert(envVar+' saved.'); location.reload(); });
+}
+
+// Init
+refreshStats();
+</script>
+</body>
+</html>
