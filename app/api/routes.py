@@ -643,6 +643,17 @@ def outreach_preview(request: dict):
         candidates = get_outreach_candidates(limit=limit)
     except Exception:
         candidates = []
+    # Resolve channels
+    for c in candidates:
+        resolved = channel
+        if channel == "auto":
+            if c.get("business_email"):
+                resolved = "email"
+            elif c.get("phone"):
+                resolved = "phone/sms"
+            else:
+                resolved = "none"
+        c["channel"] = resolved
     return {"success": True, "candidates": candidates, "count": len(candidates)}
 
 
