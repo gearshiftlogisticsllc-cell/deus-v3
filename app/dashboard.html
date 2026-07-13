@@ -152,18 +152,36 @@ tr:hover td{background:var(--panel2)}
     <!-- OUTREACH -->
     <div class="panel" id="panel-outreach">
       <div class="panel-title">Outreach Agent</div>
-      <div class="panel-desc">Sends first-contact emails. Configure tone, SMTP accounts, and import contact lists.</div>
+      <div class="panel-desc">Preview leads first, then confirm to send emails. No emails sent without your approval.</div>
       <div class="section">
-        <h3>Run Outreach</h3>
+        <h3>Step 1: Preview Leads</h3>
         <div class="row">
           <div class="field" style="flex:.5">
             <label>Channel</label>
-            <select id="out-channel"><option>auto</option><option>email</option><option>linkedin</option><option>instagram</option><option>facebook</option><option>phone/sms</option></select>
+            <select id="out-channel"><option>email</option><option>auto</option><option>linkedin</option><option>instagram</option><option>facebook</option><option>phone/sms</option></select>
           </div>
-          <button onclick="runOutreach()" id="out-btn">Run Outreach</button>
+          <div class="field" style="flex:.3">
+            <label>Batch Limit</label>
+            <input type="number" id="out-limit" value="25" min="1" max="500">
+          </div>
+          <button onclick="previewOutreach()" id="out-preview-btn">Preview Leads</button>
+          <button onclick="sendConfirmed()" id="out-send-btn" style="display:none;background:var(--green);color:#0A0F1C;border:none">Send to Selected</button>
+          <span id="out-selected-count" style="color:var(--cyan);font-size:12px;align-self:center"></span>
         </div>
       </div>
-      <div style="display:flex;gap:0;border:1px solid var(--border);border-radius:8px;overflow:hidden;margin-bottom:16px">
+      <div class="section" id="out-preview-section" style="display:none">
+        <h3>Step 2: Review & Confirm <span id="out-preview-count" style="color:var(--muted);font-weight:400"></span></h3>
+        <div class="row" style="margin-bottom:8px">
+          <label style="font-size:12px;color:var(--cyan);cursor:pointer"><input type="checkbox" id="out-select-all" onchange="toggleSelectAll()"> Select All</label>
+        </div>
+        <div class="tbl-wrap" style="max-height:400px">
+          <table><thead><tr>
+            <th style="width:30px"><input type="checkbox" id="out-check-all" onchange="toggleSelectAll()"></th>
+            <th>Business</th><th>Email</th><th>Channel</th><th>Status</th>
+          </tr></thead><tbody id="out-preview-tbody"></tbody></table>
+        </div>
+      </div>
+      <div style="display:flex;gap:0;border:1px solid var(--border);border-radius:8px;overflow:hidden;margin:16px 0">
         <div onclick="showOutTab('style')" class="out-tab active" id="outtab-style" style="padding:10px 16px;cursor:pointer;font-size:13px;background:var(--panel)">Email Style</div>
         <div onclick="showOutTab('smtp')" class="out-tab" id="outtab-smtp" style="padding:10px 16px;cursor:pointer;font-size:13px;background:var(--bg);border-left:1px solid var(--border)">SMTP Accounts</div>
         <div onclick="showOutTab('import')" class="out-tab" id="outtab-import" style="padding:10px 16px;cursor:pointer;font-size:13px;background:var(--bg);border-left:1px solid var(--border)">Import Contacts</div>
@@ -207,12 +225,12 @@ tr:hover td{background:var(--panel2)}
       <div id="outsub-import" class="outsub" style="display:none">
         <div class="section">
           <h3>Import Contacts</h3>
-          <p style="font-size:12px;color:var(--muted);margin-bottom:10px">Import your own client/contact list (CSV, TXT). Contacts merge into leads.json.</p>
+          <p style="font-size:12px;color:var(--muted);margin-bottom:10px">Import your own client/contact list (CSV, TXT, DOCX, PDF). Contacts merge into the database.</p>
           <div class="row">
             <div class="field" style="flex:1"><label>Default Niche</label><input type="text" id="import-niche" placeholder="e.g. dental clinics"></div>
           </div>
           <div class="row">
-            <input type="file" id="import-file" accept=".csv,.txt" style="font-size:12px">
+            <input type="file" id="import-file" accept=".csv,.txt,.docx,.pdf" style="font-size:12px">
             <button onclick="importContacts()">Import</button>
           </div>
         </div>
@@ -541,20 +559,95 @@ function showOutTab(name) {
   tab.style.background='var(--panel)'; tab.classList.add('active');
 }
 
-function runOutreach() {
+// ========== OUTREACH PREVIEW + SEND ==========
+let outPreviewData = [];
+let outSelectedIds = new Set();
+
+function previewOutreach() {
   clearLog('out-log');
-  log('out-log', 'Starting outreach (channel: '+document.getElementById('out-channel').value+')...', 'info');
-  setBtn('out-btn', true);
-  fetch(API+'/api/agents/OutreachAgent/run', {
+  const limit = document.getElementById('out-limit').value || 25;
+  const channel = document.getElementById('out-channel').value;
+  log('out-log', 'Previewing leads (limit: '+limit+', channel: '+channel+')...', 'info');
+  setBtn('out-preview-btn', true);
+
+  fetch(API+'/api/outreach/preview', {
     method:'POST', headers:{'Content-Type':'application/json'},
-    body: JSON.stringify({kwargs:{channel:document.getElementById('out-channel').value}})
+    body: JSON.stringify({limit: parseInt(limit), channel: channel})
   }).then(r=>r.json()).then(d=>{
-    setBtn('out-btn', false);
+    setBtn('out-preview-btn', false);
+    if (!d.success || !d.candidates || d.candidates.length === 0) {
+      log('out-log', d.message || d.detail || 'No candidates found', 'err');
+      return;
+    }
+    outPreviewData = d.candidates;
+    outSelectedIds = new Set(d.candidates.map(c => c.id));
+    log('out-log', 'Found '+d.candidates.length+' leads ready for outreach. Select which ones to email.', 'ok');
+    renderPreviewTable();
+    document.getElementById('out-preview-section').style.display = '';
+    document.getElementById('out-send-btn').style.display = '';
+    updateSelectedCount();
+  }).catch(e=>{ setBtn('out-preview-btn', false); log('out-log', 'ERROR: '+e, 'err'); });
+}
+
+function renderPreviewTable() {
+  let html = '';
+  outPreviewData.forEach(lead => {
+    const checked = outSelectedIds.has(lead.id) ? 'checked' : '';
+    const statusColor = lead.has_email ? '#A6E3A1' : '#FFB86C';
+    const statusText = lead.has_email ? 'Ready' : 'No email';
+    html += '<tr>';
+    html += '<td><input type="checkbox" '+checked+' onchange="toggleLead('+(lead.id)+', this.checked)"></td>';
+    html += '<td>'+(lead.business_name||'Unknown')+'</td>';
+    html += '<td style="color:#7D93B8">'+(lead.business_email||'-')+'</td>';
+    html += '<td style="color:#5EEAFF">'+(lead.channel||'-')+'</td>';
+    html += '<td><span style="color:'+statusColor+'">'+statusText+'</span></td>';
+    html += '</tr>';
+  });
+  document.getElementById('out-preview-tbody').innerHTML = html;
+  document.getElementById('out-preview-count').textContent = '('+outPreviewData.length+' leads)';
+}
+
+function toggleLead(id, checked) {
+  if (checked) outSelectedIds.add(id); else outSelectedIds.delete(id);
+  updateSelectedCount();
+}
+
+function toggleSelectAll() {
+  const checked = document.getElementById('out-check-all').checked;
+  document.getElementById('out-select-all').checked = checked;
+  if (checked) { outSelectedIds = new Set(outPreviewData.map(c => c.id)); }
+  else { outSelectedIds = new Set(); }
+  renderPreviewTable();
+  updateSelectedCount();
+}
+
+function updateSelectedCount() {
+  document.getElementById('out-selected-count').textContent = outSelectedIds.size+' selected';
+}
+
+function sendConfirmed() {
+  if (outSelectedIds.size === 0) { alert('Select at least one lead'); return; }
+  if (!confirm('Send emails to '+outSelectedIds.size+' leads?')) return;
+  const channel = document.getElementById('out-channel').value;
+  setBtn('out-send-btn', true);
+  log('out-log', 'Sending to '+outSelectedIds.size+' confirmed leads...', 'info');
+
+  fetch(API+'/api/outreach/send', {
+    method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({lead_ids: Array.from(outSelectedIds), channel: channel})
+  }).then(r=>r.json()).then(d=>{
+    setBtn('out-send-btn', false);
     const msg = d.message || d.detail || JSON.stringify(d);
     log('out-log', msg, d.success===false||d.detail?'err':'ok');
+    if (d.stats) log('out-log', 'Stats: sent='+d.stats.sent+', failed='+d.stats.failed, 'ok');
+    outSelectedIds = new Set();
+    document.getElementById('out-preview-section').style.display = 'none';
+    document.getElementById('out-send-btn').style.display = 'none';
     refreshStats();
-  }).catch(e=>{ setBtn('out-btn', false); log('out-log', 'ERROR: '+e, 'err'); });
+  }).catch(e=>{ setBtn('out-send-btn', false); log('out-log', 'ERROR: '+e, 'err'); });
 }
+
+function runOutreach() { previewOutreach(); }
 
 // Load outreach config
 fetch(API+'/api/outreach/config').then(r=>r.json()).then(d=>{

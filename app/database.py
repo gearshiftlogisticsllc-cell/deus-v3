@@ -124,6 +124,41 @@ def init_db():
                 extra TEXT,
                 UNIQUE(metric, date)
             );
+
+            CREATE TABLE IF NOT EXISTS leads (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                business_name TEXT,
+                owner_name TEXT,
+                business_email TEXT,
+                phone TEXT,
+                website TEXT,
+                address TEXT,
+                niche TEXT,
+                category TEXT,
+                services_offered TEXT,
+                linkedin_url TEXT,
+                instagram_handle TEXT,
+                facebook_url TEXT,
+                source TEXT DEFAULT 'unknown',
+                status TEXT DEFAULT 'new',
+                outreach_ready INTEGER DEFAULT 0,
+                needs_human INTEGER DEFAULT 0,
+                needs_human_reason TEXT,
+                channel_used TEXT,
+                preferred_channel TEXT DEFAULT 'email',
+                score INTEGER DEFAULT 0,
+                notes TEXT,
+                extra_json TEXT,
+                first_contacted_at REAL,
+                last_contacted_at REAL,
+                contact_count INTEGER DEFAULT 0,
+                created_at REAL DEFAULT (strftime('%s','now')),
+                updated_at REAL DEFAULT (strftime('%s','now'))
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_leads_email ON leads(business_email);
+            CREATE INDEX IF NOT EXISTS idx_leads_status ON leads(status);
+            CREATE INDEX IF NOT EXISTS idx_leads_outreach_ready ON leads(outreach_ready);
         """)
 
         # Migration: add columns that may not exist on older DBs
@@ -141,6 +176,11 @@ def init_db():
         if existing == 0:
             _create_user(conn, "optima", "Sh.739235511", "admin")
             _create_user(conn, "Taha", "Dr.tk@uol.com", "user")
+
+        # Migrate leads.json into leads table if table is empty
+        lead_count = conn.execute("SELECT COUNT(*) as c FROM leads").fetchone()["c"]
+        if lead_count == 0:
+            _migrate_leads_json(conn)
 
 
 def _create_user(conn, username: str, password: str, role: str):
@@ -361,3 +401,209 @@ def get_analytics_summary() -> dict:
             "SELECT metric, SUM(value) as total FROM analytics GROUP BY metric"
         ).fetchall()
         return {r["metric"]: r["total"] for r in rows}
+
+
+# ---------------------------------------------------------------------------
+# Leads CRUD
+# ---------------------------------------------------------------------------
+
+_LEAD_FIELDS = [
+    "business_name", "owner_name", "business_email", "phone", "website",
+    "address", "niche", "category", "services_offered", "linkedin_url",
+    "instagram_handle", "facebook_url", "source", "status", "outreach_ready",
+    "needs_human", "needs_human_reason", "channel_used", "preferred_channel",
+    "score", "notes",
+]
+
+
+def _row_to_dict(row) -> dict:
+    d = dict(row)
+    d.pop("extra_json", None)
+    return d
+
+
+def upsert_lead(lead: dict) -> int:
+    """Insert or update a lead. Returns the lead ID."""
+    with db_conn() as conn:
+        email = lead.get("business_email", "")
+        existing = None
+        if email:
+            existing = conn.execute(
+                "SELECT id FROM leads WHERE business_email = ?", (email,)
+            ).fetchone()
+
+        if existing:
+            lid = existing["id"]
+            sets = []
+            vals = []
+            for f in _LEAD_FIELDS:
+                if f in lead:
+                    sets.append(f"{f} = ?")
+                    vals.append(lead[f])
+            sets.append("updated_at = strftime('%s','now')")
+            vals.append(lid)
+            conn.execute(f"UPDATE leads SET {', '.join(sets)} WHERE id = ?", vals)
+            return lid
+        else:
+            cols = [f for f in _LEAD_FIELDS if f in lead]
+            placeholders = ", ".join(["?"] * len(cols))
+            col_names = ", ".join(cols)
+            vals = [lead[f] for f in cols]
+            cur = conn.execute(
+                f"INSERT INTO leads ({col_names}) VALUES ({placeholders})", vals
+            )
+            return cur.lastrowid
+
+
+def upsert_leads_batch(leads: list[dict]) -> dict:
+    """Insert/update multiple leads. Returns counts."""
+    imported = 0
+    skipped = 0
+    for lead in leads:
+        email = lead.get("business_email", "")
+        if not email and not lead.get("phone"):
+            skipped += 1
+            continue
+        # Set defaults
+        lead.setdefault("status", "new")
+        lead.setdefault("outreach_ready", bool(lead.get("business_email")))
+        lead.setdefault("needs_human", 0)
+        lead.setdefault("preferred_channel", "email")
+        lead.setdefault("source", "import")
+        lead.setdefault("score", 0)
+        upsert_lead(lead)
+        imported += 1
+    return {"imported": imported, "skipped": skipped}
+
+
+def get_lead(lead_id: int) -> dict:
+    with db_conn() as conn:
+        row = conn.execute("SELECT * FROM leads WHERE id = ?", (lead_id,)).fetchone()
+        return _row_to_dict(row) if row else None
+
+
+def get_leads(status: str = None, outreach_ready: bool = None,
+              has_email: bool = None, limit: int = 500, offset: int = 0) -> list[dict]:
+    with db_conn() as conn:
+        query = "SELECT * FROM leads WHERE 1=1"
+        params = []
+        if status:
+            query += " AND status = ?"
+            params.append(status)
+        if outreach_ready is not None:
+            query += " AND outreach_ready = ?"
+            params.append(1 if outreach_ready else 0)
+        if has_email is not None:
+            if has_email:
+                query += " AND business_email IS NOT NULL AND business_email != ''"
+            else:
+                query += " AND (business_email IS NULL OR business_email = '')"
+        query += " ORDER BY score DESC, id ASC LIMIT ? OFFSET ?"
+        params.extend([limit, offset])
+        rows = conn.execute(query, params).fetchall()
+        return [_row_to_dict(r) for r in rows]
+
+
+def count_leads(status: str = None, outreach_ready: bool = None) -> int:
+    with db_conn() as conn:
+        query = "SELECT COUNT(*) as c FROM leads WHERE 1=1"
+        params = []
+        if status:
+            query += " AND status = ?"
+            params.append(status)
+        if outreach_ready is not None:
+            query += " AND outreach_ready = ?"
+            params.append(1 if outreach_ready else 0)
+        return conn.execute(query, params).fetchone()["c"]
+
+
+def update_lead(lead_id: int, updates: dict):
+    with db_conn() as conn:
+        sets = []
+        vals = []
+        for k, v in updates.items():
+            if k in _LEAD_FIELDS or k in ("first_contacted_at", "last_contacted_at", "contact_count"):
+                sets.append(f"{k} = ?")
+                vals.append(v)
+        if sets:
+            sets.append("updated_at = strftime('%s','now')")
+            vals.append(lead_id)
+            conn.execute(f"UPDATE leads SET {', '.join(sets)} WHERE id = ?", vals)
+
+
+def update_leads_batch(ids: list[int], updates: dict):
+    for lid in ids:
+        update_lead(lid, updates)
+
+
+def delete_lead(lead_id: int):
+    with db_conn() as conn:
+        conn.execute("DELETE FROM leads WHERE id = ?", (lead_id,))
+
+
+def get_outreach_candidates(limit: int = 25) -> list[dict]:
+    """Get leads ready for outreach: has email, not yet contacted."""
+    with db_conn() as conn:
+        rows = conn.execute(
+            """SELECT * FROM leads
+               WHERE business_email IS NOT NULL AND business_email != ''
+               AND status != 'contacted'
+               ORDER BY score DESC, id ASC LIMIT ?""",
+            (limit,),
+        ).fetchall()
+        return [_row_to_dict(r) for r in rows]
+
+
+def mark_leads_contacted(ids: list[int], channel: str = "email"):
+    import time as _time
+    now = _time.time()
+    with db_conn() as conn:
+        for lid in ids:
+            conn.execute(
+                """UPDATE leads SET status = 'contacted', channel_used = ?,
+                   last_contacted_at = ?, contact_count = contact_count + 1,
+                   updated_at = strftime('%s','now')
+                   WHERE id = ?""",
+                (channel, now, lid),
+            )
+
+
+def _migrate_leads_json(conn):
+    """Import leads.json into the leads table on first run."""
+    leads_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "leads.json")
+    if not os.path.exists(leads_path):
+        return
+    try:
+        with open(leads_path) as f:
+            leads = json.load(f)
+    except Exception:
+        return
+
+    imported = 0
+    for lead in leads:
+        if not isinstance(lead, dict):
+            continue
+        email = lead.get("business_email", "")
+        phone = lead.get("phone", "")
+        if not email and not phone:
+            continue
+        cols = []
+        vals = []
+        for f in _LEAD_FIELDS:
+            if f in lead and lead[f] is not None:
+                cols.append(f)
+                vals.append(lead[f])
+        if not cols:
+            continue
+        # Auto-set outreach_ready
+        if "outreach_ready" not in cols:
+            cols.append("outreach_ready")
+            vals.append(1 if email else 0)
+        placeholders = ", ".join(["?"] * len(cols))
+        col_names = ", ".join(cols)
+        try:
+            conn.execute(f"INSERT INTO leads ({col_names}) VALUES ({placeholders})", vals)
+            imported += 1
+        except Exception:
+            pass
+    print(f"[DB MIGRATION] Imported {imported} leads from leads.json into database.")

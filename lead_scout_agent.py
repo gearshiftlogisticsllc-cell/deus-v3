@@ -329,6 +329,13 @@ def _save_outputs(leads: List[dict], json_path="leads.json", csv_path="leads.csv
             row = _empty_lead()
             row.update({k: lead.get(k, "") for k in fieldnames})
             w.writerow(row)
+    # Also save to database
+    try:
+        from app.database import upsert_leads_batch
+        result = upsert_leads_batch(leads)
+        logger.info("Database import: %d imported, %d skipped", result["imported"], result["skipped"])
+    except Exception as e:
+        logger.warning("Database save failed (JSON/CSV still saved): %s", e)
     logger.info("Saved %d leads -> %s and %s", len(leads), json_path, csv_path)
 
 

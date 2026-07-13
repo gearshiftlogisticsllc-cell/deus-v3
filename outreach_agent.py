@@ -3,8 +3,12 @@ outreach_agent.py — DEUS 3.0
 ==============================
 Sends the first outreach message to leads via email or other channels.
 
-Reads:  leads.json, outreach_style_config.json, smtp_profiles.json
-Writes: leads.json (updates status), outreach_log.json (append-only log)
+Two modes:
+  - preview: Returns leads ready for outreach, asks user to confirm
+  - send:    Sends emails to the confirmed lead IDs only
+
+Reads:  leads (database), outreach_style_config.json, smtp_profiles.json
+Writes: leads (database), outreach_log.json (append-only log)
 """
 
 import os
@@ -211,81 +215,144 @@ class OutreachAgent(BaseAgent):
 
     def run(self, **kwargs) -> AgentResult:
         start = time.time()
+        mode = kwargs.get("mode", "preview")
         channel = kwargs.get("channel", "auto")
+        limit = int(kwargs.get("limit", 25))
 
         if channel not in ("auto", *self.AVAILABLE_CHANNELS):
             channel = "auto"
 
-        leads = self._load_leads()
+        if mode == "send":
+            return self._send_confirmed(kwargs, start)
+
+        return self._preview(kwargs, start)
+
+    def _preview(self, kwargs: dict, start: float) -> AgentResult:
+        """Preview leads ready for outreach. Returns list for user to confirm."""
+        limit = int(kwargs.get("limit", 25))
+        channel = kwargs.get("channel", "auto")
+
+        try:
+            from app.database import get_outreach_candidates
+            candidates = get_outreach_candidates(limit=limit)
+        except Exception:
+            candidates = self._get_candidates_from_json(limit)
+
+        if not candidates:
+            return make_result(True, "No leads ready for outreach. Import leads with email addresses first.",
+                              stats={"candidates": 0}, duration=time.time() - start)
+
+        preview_data = []
+        for lead in candidates:
+            resolved = self.resolve_channel(lead, lead.get("preferred_channel") or channel)
+            preview_data.append({
+                "id": lead.get("id"),
+                "business_name": lead.get("business_name", "Unknown"),
+                "business_email": lead.get("business_email", ""),
+                "phone": lead.get("phone", ""),
+                "niche": lead.get("niche", ""),
+                "channel": resolved or "none",
+                "has_email": bool(lead.get("business_email")),
+            })
+
+        summary = f"Found {len(preview_data)} leads ready for outreach. Review and confirm to send."
+        return make_result(True, summary, data=preview_data,
+                          stats={"candidates": len(preview_data)},
+                          duration=time.time() - start)
+
+    def _send_confirmed(self, kwargs: dict, start: float) -> AgentResult:
+        """Send emails to confirmed lead IDs only."""
+        lead_ids = kwargs.get("lead_ids", [])
+        channel = kwargs.get("channel", "email")
+
+        if not lead_ids:
+            return make_result(False, "No lead IDs provided. Use preview first, then send with lead_ids.",
+                              stats={}, duration=time.time() - start)
+
+        try:
+            from app.database import get_lead, mark_leads_contacted
+            leads = [get_lead(lid) for lid in lead_ids]
+            leads = [l for l in leads if l]
+        except Exception:
+            leads = self._get_leads_by_ids(lead_ids)
+
         if not leads:
-            return make_result(True, "No leads found in leads.json.",
+            return make_result(False, "No valid leads found for the given IDs.",
                               stats={}, duration=time.time() - start)
 
         sent_count = 0
         failed_count = 0
-        skipped_count = 0
-        no_channel_count = 0
         log_entries = []
         senders = self._senders()
 
         for lead in leads:
-            if lead.get("status") == "contacted":
-                continue
-
-            has_email = bool(lead.get("business_email"))
-            has_any_channel = has_email or lead.get("linkedin_url") or lead.get("instagram_handle") or lead.get("facebook_url") or lead.get("phone")
-            if not has_any_channel:
-                skipped_count += 1
-                continue
-            lead["outreach_ready"] = True
-
-            requested = lead.get("preferred_channel") or channel
-            resolved_channel = self.resolve_channel(lead, requested)
-
-            if resolved_channel is None:
-                lead["needs_human"] = True
-                lead["needs_human_reason"] = f"Requested channel '{requested}' has no matching contact info."
-                no_channel_count += 1
+            resolved = self.resolve_channel(lead, channel)
+            if resolved is None:
+                failed_count += 1
                 continue
 
             message = self.generate_outreach_message(lead)
-            sender = senders[resolved_channel]
-            sent = sender(lead, message)
+            sender = senders.get(resolved)
+            if not sender:
+                failed_count += 1
+                continue
 
+            sent = sender(lead, message)
             if sent:
-                lead["status"] = "contacted"
-                lead["channel_used"] = resolved_channel
-                self.tracker.record_sent(lead, channel=resolved_channel, message=message)
                 sent_count += 1
+                log_entries.append({
+                    "lead_id": lead.get("id"),
+                    "business_name": lead.get("business_name"),
+                    "business_email": lead.get("business_email"),
+                    "channel": resolved,
+                    "sent": True,
+                    "message": message[:200],
+                    "smtp_profile": self.smtp_profile.profile_name if self.smtp_profile else None,
+                })
             else:
-                lead["status"] = "send_failed"
                 failed_count += 1
 
-            log_entries.append({
-                "business_name": lead.get("business_name"),
-                "business_email": lead.get("business_email"),
-                "channel": resolved_channel,
-                "sent": sent,
-                "message": message,
-                "smtp_profile": self.smtp_profile.profile_name if self.smtp_profile else None,
-            })
+        if log_entries:
+            try:
+                from app.database import mark_leads_contacted, log_email
+                ids = [e["lead_id"] for e in log_entries if e.get("lead_id")]
+                mark_leads_contacted(ids, channel)
+                for e in log_entries:
+                    if e.get("business_email"):
+                        log_email(
+                            lead_email=e["business_email"],
+                            lead_name=e.get("business_name", ""),
+                            subject="Outreach",
+                            status="sent",
+                            agent="OutreachAgent",
+                        )
+            except Exception:
+                pass
 
-        self._save_leads(leads)
-        self._append_outreach_log(log_entries)
+            self._append_outreach_log(log_entries)
 
-        summary = (
-            f"Sent: {sent_count} | Failed: {failed_count} | "
-            f"Skipped (needs human): {skipped_count} | No channel: {no_channel_count}"
-        )
-        logger.info("Outreach complete (channel: %s). %s", channel, summary)
-
-        stats = {
-            "sent": sent_count,
-            "failed": failed_count,
-            "skipped": skipped_count,
-            "no_channel": no_channel_count,
-        }
+        summary = f"Sent: {sent_count} | Failed: {failed_count} | Total confirmed: {len(lead_ids)}"
+        stats = {"sent": sent_count, "failed": failed_count, "total": len(lead_ids)}
         return make_result(True, summary, stats=stats, duration=time.time() - start)
+
+    def _get_candidates_from_json(self, limit: int) -> list:
+        """Fallback: read from leads.json if database unavailable."""
+        leads = self._load_leads()
+        candidates = []
+        for lead in leads:
+            if lead.get("status") == "contacted":
+                continue
+            if not lead.get("business_email"):
+                continue
+            if len(candidates) >= limit:
+                break
+            candidates.append(lead)
+        return candidates
+
+    def _get_leads_by_ids(self, ids: list) -> list:
+        """Fallback: find leads in leads.json by business_email match."""
+        leads = self._load_leads()
+        return [l for l in leads if l.get("business_email") and id(l) in ids][:len(ids)]
 
     def _load_leads(self) -> list:
         try:

@@ -232,9 +232,16 @@ def process_command(request: CommandRequest):
 
 @router.get("/api/stats")
 def get_stats():
+    try:
+        from app.database import count_leads
+        leads = count_leads()
+        contacted = count_leads(status="contacted")
+    except Exception:
+        leads = len(_load_json("leads.json"))
+        contacted = 0
     return {
-        "leads": len(_load_json("leads.json")),
-        "outreach": len(_load_json("outreach_log.json")),
+        "leads": leads,
+        "outreach": contacted,
         "appointments": len(_load_json("appointments.json")),
         "deals": len(_load_json("deals_log.json")),
     }
@@ -469,37 +476,45 @@ def import_contacts(request: dict):
                     seen.add(key)
                     deduped.append(lead)
 
-            # Merge into leads.json
-            leads_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "leads.json")
-            existing = []
-            try:
-                with open(leads_path) as f:
-                    existing = json.load(f)
-            except (FileNotFoundError, json.JSONDecodeError):
-                existing = []
-
-            existing_keys = {l.get("business_email") or l.get("phone") for l in existing if isinstance(l, dict)}
-            imported_count = 0
-            skipped_count = 0
+            # Set defaults for all leads
             for lead in deduped:
-                key = lead.get("business_email") or lead.get("phone")
-                if key in existing_keys:
-                    skipped_count += 1
-                    continue
                 lead.setdefault("niche", niche)
                 lead.setdefault("preferred_channel", "email")
                 lead["status"] = lead.get("status", "new")
                 lead["source"] = "manual_import"
                 lead["outreach_ready"] = bool(lead.get("business_email"))
-                lead["needs_human"] = not lead.get("business_email")
+                lead["needs_human"] = 0 if lead.get("business_email") else 1
                 if lead["needs_human"]:
                     lead["needs_human_reason"] = "Imported contact has no email — needs a call."
-                existing.append(lead)
-                existing_keys.add(key)
-                imported_count += 1
 
-            with open(leads_path, "w") as f:
-                json.dump(existing, f, indent=2)
+            # Save to database
+            try:
+                from app.database import upsert_leads_batch
+                result = upsert_leads_batch(deduped)
+                imported_count = result["imported"]
+                skipped_count = result["skipped"]
+            except Exception as e:
+                # Fallback to leads.json
+                leads_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "leads.json")
+                existing = []
+                try:
+                    with open(leads_path) as f:
+                        existing = json.load(f)
+                except (FileNotFoundError, json.JSONDecodeError):
+                    existing = []
+                existing_keys = {l.get("business_email") or l.get("phone") for l in existing if isinstance(l, dict)}
+                imported_count = 0
+                skipped_count = 0
+                for lead in deduped:
+                    key = lead.get("business_email") or lead.get("phone")
+                    if key in existing_keys:
+                        skipped_count += 1
+                        continue
+                    existing.append(lead)
+                    existing_keys.add(key)
+                    imported_count += 1
+                with open(leads_path, "w") as f:
+                    json.dump(existing, f, indent=2)
 
             return {"success": True, "imported": imported_count, "skipped_duplicates": skipped_count, "total_in_file": len(deduped)}
         else:
@@ -597,13 +612,77 @@ def mark_reply(request: dict):
 
 @router.get("/api/leads/status-summary")
 def lead_status_summary():
-    leads = _load_json("leads.json")
-    summary = {}
-    for lead in leads:
-        if isinstance(lead, dict):
-            status = lead.get("status", "new")
-            summary[status] = summary.get(status, 0) + 1
-    return {
-        "total": len(leads),
-        "by_status": summary,
-    }
+    try:
+        from app.database import count_leads, get_leads
+        total = count_leads()
+        new = count_leads(status="new")
+        contacted = count_leads(status="contacted")
+        ready = count_leads(outreach_ready=True)
+        return {"total": total, "by_status": {"new": new, "contacted": contacted, "outreach_ready": ready}}
+    except Exception:
+        leads = _load_json("leads.json")
+        summary = {}
+        for lead in leads:
+            if isinstance(lead, dict):
+                status = lead.get("status", "new")
+                summary[status] = summary.get(status, 0) + 1
+        return {"total": len(leads), "by_status": summary}
+
+
+# ---------------------------------------------------------------------------
+# Outreach Preview + Confirm flow
+# ---------------------------------------------------------------------------
+
+@router.post("/api/outreach/preview")
+def outreach_preview(request: dict):
+    """Preview leads ready for outreach. Returns candidates for user to review."""
+    limit = int(request.get("limit", 25))
+    channel = request.get("channel", "email")
+    try:
+        from app.database import get_outreach_candidates
+        candidates = get_outreach_candidates(limit=limit)
+    except Exception:
+        candidates = []
+    return {"success": True, "candidates": candidates, "count": len(candidates)}
+
+
+@router.post("/api/outreach/send")
+def outreach_send(request: dict):
+    """Send emails to confirmed lead IDs only."""
+    lead_ids = request.get("lead_ids", [])
+    channel = request.get("channel", "email")
+    if not lead_ids:
+        raise HTTPException(status_code=400, detail="lead_ids is required")
+    try:
+        from outreach_agent import OutreachAgent
+        agent = OutreachAgent()
+        result = agent.run(mode="send", lead_ids=lead_ids, channel=channel)
+        return {"success": result.success, "message": result.message, "stats": result.stats}
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+
+
+@router.get("/api/leads/list")
+def list_leads_db(status: str = None, limit: int = 500, offset: int = 0):
+    """List leads from the database."""
+    try:
+        from app.database import get_leads
+        leads = get_leads(status=status, limit=limit, offset=offset)
+        total = count_leads(status=status)
+        return {"leads": leads, "total": total}
+    except Exception:
+        return {"leads": [], "total": 0}
+
+
+@router.get("/api/leads/count")
+def leads_count():
+    try:
+        from app.database import count_leads
+        return {
+            "total": count_leads(),
+            "new": count_leads(status="new"),
+            "contacted": count_leads(status="contacted"),
+            "outreach_ready": count_leads(outreach_ready=True),
+        }
+    except Exception:
+        return {"total": 0, "new": 0, "contacted": 0, "outreach_ready": 0}
