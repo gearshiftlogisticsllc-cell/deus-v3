@@ -232,9 +232,12 @@ class OutreachAgent(BaseAgent):
             if lead.get("status") == "contacted":
                 continue
 
-            if not lead.get("outreach_ready"):
+            has_email = bool(lead.get("business_email"))
+            has_any_channel = has_email or lead.get("linkedin_url") or lead.get("instagram_handle") or lead.get("facebook_url") or lead.get("phone")
+            if not has_any_channel:
                 skipped_count += 1
                 continue
+            lead["outreach_ready"] = True
 
             requested = lead.get("preferred_channel") or channel
             resolved_channel = self.resolve_channel(lead, requested)
