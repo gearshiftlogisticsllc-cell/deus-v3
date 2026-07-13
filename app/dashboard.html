@@ -550,7 +550,8 @@ function runOutreach() {
     body: JSON.stringify({kwargs:{channel:document.getElementById('out-channel').value}})
   }).then(r=>r.json()).then(d=>{
     setBtn('out-btn', false);
-    log('out-log', d.message, d.success?'ok':'err');
+    const msg = d.message || d.detail || JSON.stringify(d);
+    log('out-log', msg, d.success===false||d.detail?'err':'ok');
     refreshStats();
   }).catch(e=>{ setBtn('out-btn', false); log('out-log', 'ERROR: '+e, 'err'); });
 }
@@ -649,7 +650,8 @@ function runAgent(panel, agentName) {
     body: JSON.stringify({kwargs:{}})
   }).then(r=>r.json()).then(d=>{
     setBtn(btnId, false);
-    log(logId+'-log', d.message, d.success?'ok':'err');
+    const msg = d.message || d.detail || JSON.stringify(d);
+    log(logId+'-log', msg, d.success===false||d.detail?'err':'ok');
     if (d.data) log(logId+'-log', JSON.stringify(d.data,null,2));
     refreshStats();
   }).catch(e=>{ setBtn(btnId, false); log(logId+'-log', 'ERROR: '+e, 'err'); });
@@ -665,7 +667,7 @@ function runBridge() {
     method:'POST', headers:{'Content-Type':'application/json'},
     body: JSON.stringify({command:cmd})
   }).then(r=>r.json()).then(d=>{
-    log('bridge-log', d.message, d.success?'ok':'err');
+    log('bridge-log', d.message || d.detail || JSON.stringify(d), d.success===false||d.detail?'err':'ok');
   }).catch(e=>{ log('bridge-log', 'ERROR: '+e, 'err'); });
 }
 

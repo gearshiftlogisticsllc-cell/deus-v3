@@ -107,7 +107,20 @@ def _load_agent_classes():
 
 def get_agent_class(name: str) -> Optional[type]:
     _load_agent_classes()
-    return _AGENT_CLASSES.get(name)
+    # Try exact match first
+    cls = _AGENT_CLASSES.get(name)
+    if cls:
+        return cls
+    # Try snake_case: OutreachAgent -> outreach_agent
+    snake = name[0].lower() + ''.join('_'+c.lower() if c.isupper() else c for c in name[1:])
+    cls = _AGENT_CLASSES.get(snake)
+    if cls:
+        return cls
+    # Try searching by .name attribute
+    for key, cls in _AGENT_CLASSES.items():
+        if getattr(cls, 'name', '') == name or getattr(cls, 'name', '') == snake:
+            return cls
+    return None
 
 
 def get_available_agents() -> list:
