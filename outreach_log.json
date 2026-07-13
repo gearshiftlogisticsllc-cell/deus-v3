@@ -1,0 +1,114 @@
+[
+  {
+    "business_name": null,
+    "business_email": "ethereal.enterprise.pk@gmail.com",
+    "channel": "email",
+    "sent": false,
+    "message": "Dear There Team, \nI came across your business and was impressed with the work you do. I'd like to introduce a potential opportunity that could benefit your company. It would be great to discuss this further with you. Would you be open to a short call this week? This will give us a chance to explore how we can work together. I look forward to hearing from you.\nBest regards",
+    "smtp_profile": "Sales Gmail"
+  },
+  {
+    "business_name": null,
+    "business_email": "invoke.iv@gmail.com",
+    "channel": "email",
+    "sent": false,
+    "message": "We've been researching companies in your niche and believe our services could be a great fit for there. We'd like to introduce a business proposal that could bring value to your operations. Would you be open to a short call this week to discuss the details? This would provide an opportunity for us to understand your needs and outline how we can support you. We look forward to the possibility of speaking with you soon.\nBest regards",
+    "smtp_profile": "Sales Gmail"
+  },
+  {
+    "business_name": null,
+    "business_email": "zeptratech@gmail.com",
+    "channel": "email",
+    "sent": false,
+    "message": "Dear There Team, \nI am reaching out to introduce a business proposal that may be of interest to your organization. Our services have the potential to bring significant value to your operations. I would appreciate the opportunity to discuss this further with you. Would you be open to a short call this week? \nBest regards",
+    "smtp_profile": "Sales Gmail"
+  },
+  {
+    "business_name": null,
+    "business_email": "swiftbillsllc.com@gmail.com",
+    "channel": "email",
+    "sent": false,
+    "message": "Dear There Team, \n\nI am reaching out to introduce a potential business opportunity that I believe could be of interest to your company. Our services align with your niche and may offer a valuable solution. I would like to discuss this further with you. Would you be open to a short call this week? This will provide an opportunity to explore how our services can support your business goals. \n\nBest regards, \nTeam",
+    "smtp_profile": "Sales Gmail"
+  },
+  {
+    "business_name": null,
+    "business_email": "promobillingllc@gmail.com",
+    "channel": "email",
+    "sent": false,
+    "message": "I am reaching out to introduce a business proposal that may be of interest to there. Our services have the potential to bring significant value to your operations. I would appreciate the opportunity to discuss this further with you. Would you be open to a short call this week? This would allow us to explore how our services can support your business goals. I look forward to hearing from you.\n\nBest regards",
+    "smtp_profile": "Sales Gmail"
+  },
+  {
+    "business_name": null,
+    "business_email": "rapidpaytech@gmail.com",
+    "channel": "email",
+    "sent": false,
+    "message": "We've been researching companies in your niche and believe our services could be a great fit for there. We'd like to introduce a business proposal that could bring value to your operations. Would you be open to a short call this week to discuss the details? This would provide an opportunity for us to better understand your needs and explore potential collaboration. We look forward to the possibility of speaking with you soon.\nBest regards",
+    "smtp_profile": "Sales Gmail"
+  },
+  {
+    "business_name": null,
+    "business_email": "payproplus@gmail.com",
+    "channel": "email",
+    "sent": false,
+    "message": "Dear There Team, \nI came across your business and was impressed with the work you're doing. I'd like to introduce a proposal that could potentially benefit your operations. It would be great to discuss this further with you. Would you be open to a short call this week? I believe a brief conversation could be mutually beneficial. \nBest regards,",
+    "smtp_profile": "Sales Gmail"
+  },
+  {
+    "business_name": null,
+    "business_email": "ethereal.enterprise.pk@gmail.com",
+    "channel": "email",
+    "sent": true,
+    "message": "Dear There Team,\n\nI am reaching out to introduce a business proposal that I believe could be of value to your organization. Our services have the potential to drive growth and improvement in your niche. I would love the opportunity to discuss this further with you. Would you be open to a short call this week? This would allow us to explore how our proposal can benefit your business.\n\nBest regards,\nTeam",
+    "smtp_profile": "Sales Gmail"
+  },
+  {
+    "business_name": null,
+    "business_email": "invoke.iv@gmail.com",
+    "channel": "email",
+    "sent": true,
+    "message": "I am reaching out to introduce a potential business proposal that may be of interest to there. Our services align with your niche and we believe our collaboration could be mutually beneficial. I would like to discuss this opportunity further with you. Would you be open to a short call this week? This would provide a chance to explore how our services can support your business goals. I look forward to the possibility of speaking with you soon.\nBest regards",
+    "smtp_profile": "Sales Gmail"
+  },
+  {
+    "business_name": null,
+    "business_email": "zeptratech@gmail.com",
+    "channel": "email",
+    "sent": true,
+    "message": "Dear There Team, \nWe've been following your progress in the industry and believe our services could complement your business. We'd like to introduce a proposal that could benefit your operations. Would you be open to a short call this week to discuss the details? This would provide an opportunity to explore potential synergies and answer any questions you may have. \nBest regards, \nTeam",
+    "smtp_profile": "Sales Gmail"
+  },
+  {
+    "business_name": null,
+    "business_email": "swiftbillsllc.com@gmail.com",
+    "channel": "email",
+    "sent": true,
+    "message": "We've been reviewing companies in your niche and believe our services could bring significant value to your business. We'd like to introduce a proposal tailored to your needs. Would you be open to a short call this week to discuss further? This would provide an opportunity to explore potential synergies and answer any questions you may have. We look forward to the possibility of speaking with you soon.\nBest regards",
+    "smtp_profile": "Sales Gmail"
+  },
+  {
+    "business_name": null,
+    "business_email": "promobillingllc@gmail.com",
+    "channel": "email",
+    "sent": true,
+    "message": "Dear there team, \nI am reaching out to introduce a business proposal that may be of interest to your organization. Our services have the potential to drive growth and improvement in your niche. I would appreciate the opportunity to discuss this further with you. Would you be open to a short call this week? \nBest regards",
+    "smtp_profile": "Sales Gmail"
+  },
+  {
+    "business_name": null,
+    "business_email": "rapidpaytech@gmail.com",
+    "channel": "email",
+    "sent": true,
+    "message": "Dear There Team,\n\nI came across your business and was impressed by the work you do. I'd like to introduce a proposal that could potentially benefit your operations. It would be great to discuss this opportunity further with you. Would you be open to a short call this week? This would give us a chance to explore how our services align with your goals. I look forward to the possibility of speaking with you soon.\n\nBest Regards",
+    "smtp_profile": "Sales Gmail"
+  },
+  {
+    "business_name": null,
+    "business_email": "payproplus@gmail.com",
+    "channel": "email",
+    "sent": true,
+    "message": "I am reaching out to introduce a potential business opportunity that may be of interest to there. Our proposal aligns with your niche and we believe it could bring value to your operations. I would like to briefly discuss the details with you. Would you be open to a short call this week? This would provide an opportunity to explore how our services can support your business goals. I look forward to the possibility of speaking with you soon.\nBest regards",
+    "smtp_profile": "Sales Gmail"
+  }
+]

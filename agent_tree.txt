@@ -1,0 +1,107 @@
+DEUS AGENT TREE / WORKFLOW MAP
+==============================
+
+DEUS Head / Brain
+├── Purpose: Owns the overall sales workflow, decides the next best agent, and keeps the pipeline moving.
+├── Main role: Coordinate lead discovery, outreach, follow-up, booking, closing, and reporting.
+└── Recommended sequence:
+    Lead Scout -> Outreach -> Follow-up -> Appointment -> Deal Closer -> Report
+
+1) Lead Scout Agent
+├── Role: Discover and qualify new leads.
+├── Capabilities:
+│   ├── Takes niche and location inputs from the user.
+│   ├── Searches the web for business leads using search-based intelligence.
+│   ├── Extracts business information such as name, category, address, phone, website, and services.
+│   ├── Enriches missing business emails from public websites when possible.
+│   ├── Flags leads that are ready for outreach versus those needing human review.
+│   ├── Saves results into leads.json and leads.csv.
+│   └── Writes intent profile data for future outreach runs.
+└── Works next: Outreach Agent
+
+2) Outreach Agent
+├── Role: Start conversations with leads.
+├── Capabilities:
+│   ├── Reads lead data from leads.json.
+│   ├── Generates personalized outreach messages.
+│   ├── Chooses or resolves the best messaging channel for a lead.
+│   ├── Sends email outreach through configured SMTP profiles.
+│   ├── Supports channel routing for email, LinkedIn, Instagram, Facebook, and phone/SMS.
+│   ├── Logs every outreach attempt into outreach_log.json.
+│   └── Updates lead status after sending.
+└── Works next: Follow-up Agent
+
+3) Follow-up Agent
+├── Role: Re-engage leads that were contacted but have not responded.
+├── Capabilities:
+│   ├── Finds leads that are due for follow-up.
+│   ├── Applies cooldown logic so follow-ups are not spammy.
+│   ├── Limits the number of follow-ups per lead.
+│   ├── Generates polite follow-up messages.
+│   ├── Sends follow-up emails using the outreach pipeline.
+│   ├── Marks leads as no_response after the max follow-up limit is reached.
+│   └── Keeps the lead record updated for the next stage.
+└── Works next: Appointment Agent
+
+4) Appointment Agent
+├── Role: Convert interest into a scheduled meeting.
+├── Capabilities:
+│   ├── Connects to Calendly for event-type discovery.
+│   ├── Lists upcoming scheduled appointments.
+│   ├── Recommends the best booking link for a task.
+│   ├── Helps a human or business owner self-schedule.
+│   ├── Uses Gemini and Groq for reasoning and summarization.
+│   └── Produces a concise appointment recommendation with conflict awareness.
+└── Works next: Deal Closer Agent
+
+5) Deal Closer Agent
+├── Role: Push the deal toward close after an appointment or conversation.
+├── Capabilities:
+│   ├── Processes appointments that are due.
+│   ├── Generates closing messages tailored to the lead and niche.
+│   ├── Sends closing messages through available channels.
+│   ├── Tracks appointment outcomes such as deal_closed, follow_up, or send_failed.
+│   ├── Persists appointment progress into appointments.json.
+│   └── Helps transition from meeting to conversion.
+└── Works next: Report Agent
+
+6) Report Agent
+├── Role: Summarize the whole pipeline and report results.
+├── Capabilities:
+│   ├── Collects statistics from leads, outreach, follow-ups, appointments, and deals.
+│   ├── Builds a clear daily operations summary.
+│   ├── Produces a text report for human review.
+│   ├── Can send the report by email when enabled.
+│   └── Helps the operator monitor performance and next priorities.
+└── Works next: System Checker / Health Monitor
+
+7) System Checker Agent
+├── Role: Check that the system is healthy and ready to run.
+├── Capabilities:
+│   ├── Verifies that required agent files exist and are not empty.
+│   ├── Checks whether required Python packages are installed.
+│   ├── Validates configuration files such as intent_profile.json and deus_config.json.
+│   ├── Verifies the integrity of leads_database.json.
+│   ├── Reports connectivity assumptions for major channels and services.
+│   └── Acts as a health monitor before or between workflow runs.
+
+Concept-wise flow
+-----------------
+Head / Brain
+├── Discovery: Lead Scout Agent
+├── Contact: Outreach Agent
+├── Nurture: Follow-up Agent
+├── Booking: Appointment Agent
+├── Close: Deal Closer Agent
+├── Review: Report Agent
+└── Health: System Checker Agent
+
+Best execution order
+--------------------
+1. Run System Checker Agent to confirm the environment is healthy.
+2. Run Lead Scout Agent to build the lead pool.
+3. Run Outreach Agent to contact the leads.
+4. Run Follow-up Agent for non-responsive leads.
+5. Run Appointment Agent to schedule meetings.
+6. Run Deal Closer Agent to move the opportunity toward closure.
+7. Run Report Agent to summarize the results.

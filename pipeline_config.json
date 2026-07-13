@@ -1,0 +1,89 @@
+{
+  "pipelines": {
+    "full_auto": {
+      "name": "Full Pipeline",
+      "description": "Runs all agents in sequence: Scout -> Outreach -> Followup -> Appointment -> Closer -> Report",
+      "steps": [
+        {
+          "agent": "lead_scout_agent",
+          "enabled": true,
+          "config": {},
+          "condition": null
+        },
+        {
+          "agent": "outreach_agent",
+          "enabled": true,
+          "config": {"channel": "auto"},
+          "condition": "has_outreach_ready_leads"
+        },
+        {
+          "agent": "followup_agent",
+          "enabled": true,
+          "config": {},
+          "condition": "has_contacted_leads"
+        },
+        {
+          "agent": "appointment_agent",
+          "enabled": true,
+          "config": {},
+          "condition": "has_calendly_key"
+        },
+        {
+          "agent": "deal_closer_agent",
+          "enabled": true,
+          "config": {},
+          "condition": "has_scheduled_appointments"
+        },
+        {
+          "agent": "report_agent",
+          "enabled": true,
+          "config": {},
+          "condition": null
+        }
+      ]
+    },
+    "scout_only": {
+      "name": "Scout Only",
+      "description": "Lead discovery only",
+      "steps": [
+        {
+          "agent": "lead_scout_agent",
+          "enabled": true,
+          "config": {},
+          "condition": null
+        }
+      ]
+    },
+    "outreach_cycle": {
+      "name": "Outreach Cycle",
+      "description": "Followup + Deal Closer for already-contacted leads",
+      "steps": [
+        {
+          "agent": "followup_agent",
+          "enabled": true,
+          "config": {},
+          "condition": "has_contacted_leads"
+        },
+        {
+          "agent": "deal_closer_agent",
+          "enabled": true,
+          "config": {},
+          "condition": "has_scheduled_appointments"
+        }
+      ]
+    },
+    "daily_report": {
+      "name": "Daily Report",
+      "description": "Generate and email today's pipeline summary",
+      "steps": [
+        {
+          "agent": "report_agent",
+          "enabled": true,
+          "config": {},
+          "condition": null
+        }
+      ]
+    }
+  },
+  "active_pipeline": "full_auto"
+}

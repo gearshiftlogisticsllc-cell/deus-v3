@@ -1,0 +1,39 @@
+# DEUS 3.0 — .gitignore
+
+# Secrets
+.env
+.env_token.txt
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+venv/
+*.egg-info/
+dist/
+build/
+
+# Data (runtime-generated, keep structure)
+# leads.json — tracked (sample data)
+# outreach_log.json — tracked (sample data)
+# appointments.json — runtime
+# deals_log.json — runtime
+# followup_log.json — runtime
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+Thumbs.db
+Desktop.ini
+.DS_Store
+
+# Linux venv bundles
+*.tar.gz
+
+# Logs
+*.log

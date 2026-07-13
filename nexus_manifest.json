@@ -1,0 +1,109 @@
+{
+  "version": "3.0.0",
+  "agents": [
+    {
+      "name": "system_checker_agent",
+      "display_name": "System Checker",
+      "role": "Health monitor — verifies all agents, packages, configs, and API keys",
+      "llm": null,
+      "requires_keys": [],
+      "tools": ["file_read", "package_check"],
+      "is_ceo": false
+    },
+    {
+      "name": "lead_scout_agent",
+      "display_name": "Lead Scout",
+      "role": "Discovers business leads via web search, scraping, and paid APIs",
+      "llm": "groq",
+      "requires_keys": ["GROQ_API_KEY"],
+      "tools": ["duckduckgo", "brightdata", "serper", "web_scrape"],
+      "is_ceo": false
+    },
+    {
+      "name": "outreach_agent",
+      "display_name": "Outreach",
+      "role": "Sends first-contact cold emails via SMTP with AI-generated messages",
+      "llm": "groq",
+      "requires_keys": ["GROQ_API_KEY"],
+      "tools": ["smtp", "email"],
+      "is_ceo": false
+    },
+    {
+      "name": "followup_agent",
+      "display_name": "Followup",
+      "role": "Re-engages contacted leads after 48h cooldown, max 3 attempts",
+      "llm": "groq",
+      "requires_keys": ["GROQ_API_KEY"],
+      "tools": ["smtp", "email"],
+      "is_ceo": false
+    },
+    {
+      "name": "appointment_agent",
+      "display_name": "Appointment",
+      "role": "Reads Calendly events and recommends booking links",
+      "llm": "groq+gemini",
+      "requires_keys": ["GROQ_API_KEY", "GEMINI_API_KEY", "CALENDLY_API_KEY"],
+      "tools": ["calendly_api"],
+      "is_ceo": false
+    },
+    {
+      "name": "deal_closer_agent",
+      "display_name": "Deal Closer",
+      "role": "Sends closing messages after appointments are scheduled",
+      "llm": "groq",
+      "requires_keys": ["GROQ_API_KEY"],
+      "tools": ["smtp", "email"],
+      "is_ceo": false
+    },
+    {
+      "name": "report_agent",
+      "display_name": "Report",
+      "role": "Generates daily pipeline summaries and optionally emails them",
+      "llm": "groq",
+      "requires_keys": ["GROQ_API_KEY"],
+      "tools": ["file_read", "email"],
+      "is_ceo": false
+    },
+    {
+      "name": "nexus_bridge",
+      "display_name": "NEXUS Bridge",
+      "role": "CLI orchestrator — routes natural language commands to agents",
+      "llm": "groq",
+      "requires_keys": ["GROQ_API_KEY"],
+      "tools": [],
+      "is_ceo": true
+    }
+  ],
+  "pipeline": {
+    "default_chain": [
+      "lead_scout_agent",
+      "outreach_agent",
+      "followup_agent",
+      "appointment_agent",
+      "deal_closer_agent",
+      "report_agent"
+    ],
+    "condition_routing": {
+      "outreach_agent": "requires_outreach_ready_leads",
+      "followup_agent": "requires_contacted_leads",
+      "appointment_agent": "requires_calendly_key",
+      "deal_closer_agent": "requires_scheduled_appointments",
+      "report_agent": "always"
+    }
+  },
+  "install_path": "F:\\deus v3.0",
+  "llm_providers": {
+    "primary": "groq",
+    "fallback": "gemini",
+    "groq_models": [
+      "llama-3.3-70b-versatile",
+      "llama-3.1-8b-instant",
+      "gemma2-9b-it"
+    ],
+    "gemini_models": [
+      "gemini-3.5-flash",
+      "gemini-3.1-flash-lite",
+      "gemini-flash-latest"
+    ]
+  }
+}
