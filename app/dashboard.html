@@ -89,6 +89,7 @@ tr:hover td{background:var(--panel2)}
     <div class="nav-item active" onclick="showPanel('scout')" id="nav-scout"><span class="dot-s ok"></span> Lead Scout</div>
     <div class="nav-item" onclick="showPanel('outreach')" id="nav-outreach"><span class="dot-s ok"></span> Outreach</div>
     <div class="nav-item" onclick="showPanel('followup')" id="nav-followup"><span class="dot-s"></span> Followup</div>
+    <div class="nav-item" onclick="showPanel('replies')" id="nav-replies"><span class="dot-s"></span> Replies</div>
     <div class="nav-item" onclick="showPanel('appointment')" id="nav-appointment"><span class="dot-s"></span> Appointment</div>
     <div class="nav-item" onclick="showPanel('closer')" id="nav-closer"><span class="dot-s"></span> Deal Closer</div>
     <div class="nav-item" onclick="showPanel('report')" id="nav-report"><span class="dot-s"></span> Report</div>
@@ -216,11 +217,40 @@ tr:hover td{background:var(--panel2)}
     <!-- FOLLOWUP -->
     <div class="panel" id="panel-followup">
       <div class="panel-title">Followup Agent</div>
-      <div class="panel-desc">Re-contacts leads that haven't responded within 48 hours.</div>
+      <div class="panel-desc">Re-contacts leads that haven't responded within 48 hours. Automatically skips replied leads.</div>
       <div class="section">
         <button onclick="runAgent('followup','FollowupAgent')" id="fu-btn">Run Followup</button>
         <div class="log" id="fu-log" style="margin-top:12px"></div>
       </div>
+    </div>
+
+    <!-- REPLIES -->
+    <div class="panel" id="panel-replies">
+      <div class="panel-title">Reply Detection</div>
+      <div class="panel-desc">Scan inbox for replies from contacted leads. IMAP-based, safe for shared inboxes.</div>
+      <div class="section">
+        <h3>Reply Status</h3>
+        <div id="reply-status" style="margin-bottom:12px;font-size:13px">Loading...</div>
+        <div class="row">
+          <div class="field" style="flex:.5"><label>Days Back</label><input type="number" id="reply-days" value="7" min="1" max="30"></div>
+          <button onclick="scanReplies()" id="reply-scan-btn">Scan for Replies</button>
+        </div>
+      </div>
+      <div class="section">
+        <h3>Manual Override</h3>
+        <p style="font-size:12px;color:var(--muted);margin-bottom:8px">Mark a lead as replied manually (e.g. they replied via phone or in person).</p>
+        <div class="row">
+          <div class="field"><label>Email Address</label><input type="email" id="reply-manual-email" placeholder="lead@example.com"></div>
+          <button class="btn-violet" onclick="markManualReply()">Mark as Replied</button>
+        </div>
+      </div>
+      <div class="section">
+        <h3>Recent Replies</h3>
+        <div class="tbl-wrap">
+          <table><thead><tr><th>Business</th><th>Email</th><th>Date</th><th>Subject</th></tr></thead><tbody id="reply-tbody"></tbody></table>
+        </div>
+      </div>
+      <div class="section"><h3>Activity Log</h3><div class="log" id="reply-log"></div></div>
     </div>
 
     <!-- APPOINTMENT -->
@@ -317,6 +347,18 @@ function refreshStats() {
     document.getElementById('s-appts').textContent = d.appointments||0;
     document.getElementById('s-deals').textContent = d.deals||0;
   });
+  // Also load lead status summary for sidebar dots
+  fetch(API+'/api/leads/status-summary').then(r=>r.json()).then(d=>{
+    if (d.by_status) {
+      const replied = d.by_status.replied||0;
+      const contacted = d.by_status.contacted||0;
+      // Update sidebar dots based on status
+      const fuDot = document.querySelector('#nav-followup .dot-s');
+      const rpDot = document.querySelector('#nav-replies .dot-s');
+      if (fuDot) fuDot.className = 'dot-s '+(contacted>0?'ok':'');
+      if (rpDot) rpDot.className = 'dot-s '+(replied>0?'ok':'');
+    }
+  }).catch(()=>{});
 }
 setInterval(refreshStats, 10000);
 refreshStats();
@@ -361,7 +403,9 @@ function renderScoutTable(leads) {
   const tb = document.getElementById('scout-tbody');
   tb.innerHTML = '';
   leads.forEach(l => {
-    tb.innerHTML += '<tr><td>'+(l.score||'')+'</td><td>'+(l.business_name||'')+'</td><td>'+(l.owner_name||'')+'</td><td>'+(l.phone||'')+'</td><td>'+(l.business_email||'')+'</td><td>'+(l.website||'')+'</td><td>'+(l.location||'')+'</td><td>'+(l.source||'')+'</td></tr>';
+    const st = l.status||'new';
+    const stColor = st==='replied'?'var(--green)':st==='contacted'?'var(--cyan)':st==='send_failed'?'var(--red)':st==='no_response'?'var(--amber)':'var(--muted)';
+    tb.innerHTML += '<tr><td>'+(l.score||'')+'</td><td>'+(l.business_name||'')+'</td><td>'+(l.owner_name||'')+'</td><td>'+(l.phone||'')+'</td><td>'+(l.business_email||'')+'</td><td>'+(l.website||'')+'</td><td>'+(l.location||'')+'</td><td><span style="color:'+stColor+'">'+st+'</span></td></tr>';
   });
   document.getElementById('scout-count').textContent = leads.length+' leads';
 }
@@ -565,6 +609,69 @@ function editKey(envVar) {
 
 // Init
 refreshStats();
+
+// Reply Detection
+function loadReplyStatus() {
+  fetch(API+'/api/replies/status').then(r=>r.json()).then(d=>{
+    const el = document.getElementById('reply-status');
+    let html = '';
+    html += '<span class="pill '+(d.imap_configured?'pill-ok':'pill-err')+'">'+(d.imap_configured?'IMAP Connected':'IMAP Not Configured')+'</span> ';
+    html += '<span style="margin-left:10px">Replied: <b style="color:var(--green)">'+d.leads_replied+'</b></span> ';
+    html += '<span style="margin-left:10px">Contacted: <b style="color:var(--cyan)">'+d.leads_contacted+'</b></span>';
+    if (d.imap_email) html += '<span style="margin-left:10px;color:var(--muted)">('+d.imap_email+' @ '+d.imap_host+')</span>';
+    el.innerHTML = html;
+  }).catch(()=>{ document.getElementById('reply-status').innerHTML='<span class="pill pill-err">Error loading status</span>'; });
+}
+loadReplyStatus();
+
+function scanReplies() {
+  const days = parseInt(document.getElementById('reply-days').value)||7;
+  clearLog('reply-log');
+  log('reply-log', 'Scanning inbox for replies (last '+days+' days)...', 'info');
+  setBtn('reply-scan-btn', true);
+  fetch(API+'/api/replies/scan', {
+    method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({days_back:days})
+  }).then(r=>r.json()).then(d=>{
+    setBtn('reply-scan-btn', false);
+    if (d.success) {
+      log('reply-log', 'Scan complete. Replies found: '+d.replies_found+', Leads marked: '+d.leads_marked, 'ok');
+      if (d.details && d.details.length) {
+        d.details.forEach(r => {
+          log('reply-log', '  Reply from: '+r.lead_name+' ('+r.email+') - "'+r.subject+'" on '+r.date, 'info');
+        });
+        // Update table
+        const tb = document.getElementById('reply-tbody');
+        tb.innerHTML = '';
+        d.details.forEach(r => {
+          tb.innerHTML += '<tr><td>'+r.lead_name+'</td><td>'+r.email+'</td><td>'+r.date+'</td><td>'+r.subject+'</td></tr>';
+        });
+      }
+      loadReplyStatus();
+      refreshStats();
+    } else {
+      log('reply-log', 'ERROR: '+(d.error||'Scan failed'), 'err');
+    }
+  }).catch(e=>{ setBtn('reply-scan-btn', false); log('reply-log', 'ERROR: '+e, 'err'); });
+}
+
+function markManualReply() {
+  const email = document.getElementById('reply-manual-email').value.trim();
+  if (!email) { alert('Enter an email address'); return; }
+  fetch(API+'/api/replies/mark', {
+    method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({email:email})
+  }).then(r=>r.json()).then(d=>{
+    if (d.success) {
+      log('reply-log', 'Marked '+email+' as replied.', 'ok');
+      document.getElementById('reply-manual-email').value = '';
+      loadReplyStatus();
+      refreshStats();
+    } else {
+      log('reply-log', 'Email not found in leads: '+email, 'err');
+    }
+  });
+}
 </script>
 </body>
 </html>

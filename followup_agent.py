@@ -15,6 +15,7 @@ import logging
 from dotenv import load_dotenv
 
 from base_agent import BaseAgent, AgentResult, AgentHealth, make_result, make_health
+from reply_detector import EmailTracker, scan_for_replies
 
 load_dotenv()
 
@@ -42,6 +43,7 @@ class FollowupAgent(BaseAgent):
             except Exception as e:
                 logger.warning("Groq init failed: %s", e)
         self.leads = self._load_leads()
+        self.tracker = EmailTracker()
 
     def _load_leads(self) -> list:
         try:
@@ -72,11 +74,26 @@ class FollowupAgent(BaseAgent):
 
     def run(self, **kwargs) -> AgentResult:
         start = time.time()
+
+        # Step 1: Scan for replies first (if IMAP configured)
+        reply_scan = {"replies_found": 0, "leads_marked": 0}
+        try:
+            reply_scan = scan_for_replies(days_back=7)
+            if reply_scan.get("replies_found", 0) > 0:
+                # Reload leads after reply scan updated them
+                self.leads = self._load_leads()
+        except Exception as e:
+            logger.warning("Reply scan failed (continuing anyway): %s", e)
+
+        # Step 2: Find leads that need follow-up
         leads_to_followup = self.find_leads_to_followup()
         if not leads_to_followup:
-            return make_result(True, "No leads due for follow-up.",
-                              stats={"followed_up": 0, "rejected": 0},
-                              duration=time.time() - start)
+            return make_result(True,
+                f"No leads due for follow-up. (Replies detected: {reply_scan.get('replies_found', 0)})",
+                stats={"followed_up": 0, "rejected": 0,
+                       "replies_detected": reply_scan.get("replies_found", 0),
+                       "leads_marked_replied": reply_scan.get("leads_marked", 0)},
+                duration=time.time() - start)
 
         followed_up = 0
         rejected = 0
@@ -97,16 +114,20 @@ class FollowupAgent(BaseAgent):
 
         self._save_leads()
         duration = time.time() - start
-        summary = f"Followups sent: {followed_up} | Rejected (max reached): {rejected}"
+        summary = (f"Followups sent: {followed_up} | Rejected (max reached): {rejected} | "
+                   f"Replies detected: {reply_scan.get('replies_found', 0)} | "
+                   f"Leads marked replied: {reply_scan.get('leads_marked', 0)}")
         logger.info(summary)
         return make_result(True, summary,
-                          stats={"followed_up": followed_up, "rejected": rejected},
+                          stats={"followed_up": followed_up, "rejected": rejected,
+                                 "replies_detected": reply_scan.get("replies_found", 0),
+                                 "leads_marked_replied": reply_scan.get("leads_marked", 0)},
                           duration=duration)
 
     def find_leads_to_followup(self) -> list:
         return [
             lead for lead in self.leads
-            if lead.get("status") == "contacted" and self.is_due_for_followup(lead)
+            if self.tracker.should_followup(lead)
         ]
 
     def is_due_for_followup(self, lead: dict) -> bool:
@@ -141,7 +162,10 @@ class FollowupAgent(BaseAgent):
         try:
             from outreach_agent import OutreachAgent
             sender = OutreachAgent()
-            return sender.send_email(lead, message)
+            sent = sender.send_email(lead, message)
+            if sent:
+                self.tracker.record_sent(lead, channel="email", message=message)
+            return sent
         except ImportError:
             logger.warning("outreach_agent.py not found — cannot send followup.")
             return False

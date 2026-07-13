@@ -18,6 +18,7 @@ from email.mime.text import MIMEText
 from dotenv import load_dotenv
 
 from base_agent import BaseAgent, AgentResult, AgentHealth, make_result, make_health
+from reply_detector import EmailTracker
 
 load_dotenv()
 
@@ -71,6 +72,7 @@ class OutreachAgent(BaseAgent):
             )
 
         self.smtp_profile = profile
+        self.tracker = EmailTracker()
 
     def think(self, prompt: str) -> str:
         if not self.client:
@@ -250,6 +252,7 @@ class OutreachAgent(BaseAgent):
             if sent:
                 lead["status"] = "contacted"
                 lead["channel_used"] = resolved_channel
+                self.tracker.record_sent(lead, channel=resolved_channel, message=message)
                 sent_count += 1
             else:
                 lead["status"] = "send_failed"

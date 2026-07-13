@@ -475,3 +475,54 @@ def save_api_key(env_var: str, request: dict):
         f.writelines(lines)
     os.environ[env_var] = value
     return {"saved": True}
+
+
+# ---------------------------------------------------------------------------
+# Reply Detection
+# ---------------------------------------------------------------------------
+
+@router.get("/api/replies/status")
+def reply_status():
+    try:
+        from reply_detector import get_reply_status
+        return get_reply_status()
+    except Exception as e:
+        return {"imap_configured": False, "error": str(e)}
+
+
+@router.post("/api/replies/scan")
+def scan_replies(request: dict = None):
+    days_back = 7
+    if request:
+        days_back = request.get("days_back", 7)
+    try:
+        from reply_detector import scan_for_replies
+        return scan_for_replies(days_back=days_back)
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+
+
+@router.post("/api/replies/mark")
+def mark_reply(request: dict):
+    email_addr = request.get("email", "")
+    if not email_addr:
+        raise HTTPException(status_code=400, detail="email is required")
+    try:
+        from reply_detector import mark_lead_replied
+        return mark_lead_replied(email_addr)
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+
+
+@router.get("/api/leads/status-summary")
+def lead_status_summary():
+    leads = _load_json("leads.json")
+    summary = {}
+    for lead in leads:
+        if isinstance(lead, dict):
+            status = lead.get("status", "new")
+            summary[status] = summary.get(status, 0) + 1
+    return {
+        "total": len(leads),
+        "by_status": summary,
+    }

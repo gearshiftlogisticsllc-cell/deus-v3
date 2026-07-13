@@ -27,6 +27,7 @@ DATA_FILES = {
     "followups": "followup_log.json",
     "appointments": "appointments.json",
     "deals": "deals_log.json",
+    "replies": "reply_state.json",
 }
 
 
@@ -82,6 +83,12 @@ class ReportAgent(BaseAgent):
         stats["contacted_leads"] = sum(
             1 for l in leads if isinstance(l, dict) and l.get("status") == "contacted"
         )
+        stats["replied_leads"] = sum(
+            1 for l in leads if isinstance(l, dict) and l.get("status") == "replied"
+        )
+        stats["followed_up_leads"] = sum(
+            1 for l in leads if isinstance(l, dict) and l.get("followup_count", 0) > 0
+        )
         return stats
 
     def build_report_text(self, stats: dict) -> str:
@@ -97,6 +104,8 @@ class ReportAgent(BaseAgent):
             f"Outreach-Ready Leads (have email): {stats.get('outreach_ready_leads', 0)}\n"
             f"Leads Needing Human Follow-up: {stats.get('needs_human_leads', 0)}\n"
             f"Contacted: {stats.get('contacted_leads', 0)}\n"
+            f"Replied: {stats.get('replied_leads', 0)}\n"
+            f"Followed Up: {stats.get('followed_up_leads', 0)}\n"
             f"Total Outreach Sent: {stats.get('outreach', 0)}\n"
             f"Total Followups: {stats.get('followups', 0)}\n"
             f"Total Appointments: {stats.get('appointments', 0)}\n"
