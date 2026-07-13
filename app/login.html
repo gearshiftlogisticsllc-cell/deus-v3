@@ -1,0 +1,76 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>DEUS 3.0 - Login</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0A0F1C;color:#EAF2FF;font-family:'Segoe UI',system-ui,sans-serif;height:100vh;display:flex;align-items:center;justify-content:center}
+.login-box{background:#141B2B;border:1px solid #243252;border-radius:12px;padding:40px;width:380px;box-shadow:0 20px 60px rgba(0,0,0,.5)}
+h1{font-size:24px;color:#5EEAFF;letter-spacing:3px;text-align:center;margin-bottom:6px}
+.subtitle{text-align:center;color:#7D93B8;font-size:12px;margin-bottom:28px}
+.field{margin-bottom:16px}
+.field label{display:block;font-size:11px;color:#7D93B8;text-transform:uppercase;letter-spacing:1px;margin-bottom:6px}
+.field input{width:100%;background:#1A2338;color:#EAF2FF;border:1px solid #243252;border-radius:6px;padding:10px 14px;font-size:14px;transition:border-color .2s}
+.field input:focus{outline:none;border-color:#5EEAFF}
+.login-btn{width:100%;background:#5EEAFF;color:#0A0F1C;border:none;padding:12px;border-radius:6px;font-size:15px;font-weight:700;cursor:pointer;transition:opacity .2s;margin-top:8px}
+.login-btn:hover{opacity:.85}
+.login-btn:disabled{opacity:.4;cursor:not-allowed}
+.error{color:#FF6B81;font-size:13px;text-align:center;margin-top:12px;display:none}
+.footer{text-align:center;margin-top:20px;font-size:11px;color:#3E5B8C}
+</style>
+</head>
+<body>
+<div class="login-box">
+  <h1>DEUS 3.0</h1>
+  <div class="subtitle">Digital Entity Unification System</div>
+  <form id="loginForm">
+    <div class="field">
+      <label>Username</label>
+      <input type="text" id="username" autocomplete="username" required>
+    </div>
+    <div class="field">
+      <label>Password</label>
+      <input type="password" id="password" autocomplete="current-password" required>
+    </div>
+    <button type="submit" class="login-btn" id="loginBtn">Sign In</button>
+  </form>
+  <div class="error" id="error"></div>
+  <div class="footer">GrowthDesk VA &mdash; Multi-Agent Outreach Intelligence</div>
+</div>
+<script>
+document.getElementById('loginForm').addEventListener('submit', function(e) {
+  e.preventDefault();
+  const btn = document.getElementById('loginBtn');
+  const errEl = document.getElementById('error');
+  btn.disabled = true;
+  btn.textContent = 'Signing in...';
+  errEl.style.display = 'none';
+
+  fetch('/api/auth/login', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({
+      username: document.getElementById('username').value,
+      password: document.getElementById('password').value,
+    })
+  }).then(r => r.json()).then(d => {
+    if (d.success) {
+      localStorage.setItem('deus_user', JSON.stringify(d.user));
+      window.location.href = '/';
+    } else {
+      errEl.textContent = d.detail || 'Invalid credentials';
+      errEl.style.display = 'block';
+    }
+  }).catch(err => {
+    errEl.textContent = 'Connection error';
+    errEl.style.display = 'block';
+  }).finally(() => {
+    btn.disabled = false;
+    btn.textContent = 'Sign In';
+  });
+});
+</script>
+</body>
+</html>

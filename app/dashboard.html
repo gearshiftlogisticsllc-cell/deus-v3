@@ -15,6 +15,7 @@ button:hover,.btn:hover{opacity:.85}
 .btn-violet{background:var(--violet)}
 .btn-green{background:var(--green)}
 .btn-red{background:var(--red)}
+.btn-red{background:var(--red)}
 .btn-muted{background:var(--muted)}
 label{font-size:12px;color:var(--muted);text-transform:uppercase;letter-spacing:1px}
 .pill{font-size:11px;padding:2px 8px;border-radius:4px;font-weight:700;display:inline-block}
@@ -72,7 +73,8 @@ tr:hover td{background:var(--panel2)}
   <span class="badge">LIVE</span>
   <div class="right">
     <span><span class="dot"></span> Online</span>
-    <span>v3.0.0</span>
+    <span id="user-info" style="color:var(--cyan)">Loading...</span>
+    <button class="btn-red" onclick="logout()" style="padding:3px 10px;font-size:11px">Logout</button>
   </div>
 </div>
 
@@ -95,6 +97,10 @@ tr:hover td{background:var(--panel2)}
     <div class="nav-item" onclick="showPanel('report')" id="nav-report"><span class="dot-s"></span> Report</div>
     <div class="nav-item" onclick="showPanel('bridge')" id="nav-bridge"><span class="dot-s"></span> DEUS Bridge</div>
     <div class="nav-item" onclick="showPanel('pipelines')" id="nav-pipelines"><span class="dot-s"></span> Pipelines</div>
+    <div class="nav-item" onclick="showPanel('analytics')" id="nav-analytics"><span class="dot-s"></span> Analytics</div>
+    <div class="nav-item" onclick="showPanel('rules')" id="nav-rules"><span class="dot-s"></span> PDF Rules</div>
+    <div class="nav-item" onclick="showPanel('custom-pipes')" id="nav-custom-pipes"><span class="dot-s"></span> Custom Pipes</div>
+    <div class="nav-item" onclick="showPanel('pending')" id="nav-pending" style="display:none"><span class="dot-s"></span> Pending <span id="pending-badge" style="background:#FF6B81;color:#fff;border-radius:8px;padding:1px 6px;font-size:10px;margin-left:4px;display:none">0</span></div>
     <div class="nav-item" onclick="showPanel('apikeys')" id="nav-apikeys"><span class="dot-s"></span> API Keys</div>
   </div>
 
@@ -310,11 +316,116 @@ tr:hover td{background:var(--panel2)}
       <div class="section" id="apikey-list"></div>
     </div>
 
+    <!-- ANALYTICS -->
+    <div class="panel" id="panel-analytics">
+      <div class="panel-title">Email Analytics</div>
+      <div class="panel-desc">Track email delivery, opens, clicks, and engagement across all campaigns.</div>
+      <div class="section">
+        <h3>Overview</h3>
+        <div class="row">
+          <div class="stat-chip" style="flex:1;text-align:center"><div style="font-size:22px;font-weight:700;color:#5EEAFF" id="ana-sent">0</div><div style="font-size:11px;color:#7D93B8">Sent</div></div>
+          <div class="stat-chip" style="flex:1;text-align:center"><div style="font-size:22px;font-weight:700;color:#5EEAFF" id="ana-replies">0</div><div style="font-size:11px;color:#7D93B8">Replies</div></div>
+          <div class="stat-chip" style="flex:1;text-align:center"><div style="font-size:22px;font-weight:700;color:#5EEAFF" id="ana-response-rate">0%</div><div style="font-size:11px;color:#7D93B8">Response Rate</div></div>
+          <div class="stat-chip" style="flex:1;text-align:center"><div style="font-size:22px;font-weight:700;color:#5EEAFF" id="ana-bounced">0</div><div style="font-size:11px;color:#7D93B8">Bounced</div></div>
+        </div>
+        <div class="row" style="margin-top:10px">
+          <div class="stat-chip" style="flex:1;text-align:center"><div style="font-size:22px;font-weight:700;color:#FF6B81" id="ana-complained">0</div><div style="font-size:11px;color:#7D93B8">Spam Complaints</div></div>
+          <div class="stat-chip" style="flex:1;text-align:center"><div style="font-size:22px;font-weight:700;color:#FFB86C" id="ana-failed">0</div><div style="font-size:11px;color:#7D93B8">Failed</div></div>
+          <div class="stat-chip" style="flex:1;text-align:center"><div style="font-size:22px;font-weight:700;color:#A6E3A1" id="ana-delivered">0</div><div style="font-size:11px;color:#7D93B8">Delivered</div></div>
+        </div>
+      </div>
+      <div class="section">
+        <h3>Recent Emails</h3>
+        <div class="tbl-wrap">
+          <table><thead><tr><th>Time</th><th>To</th><th>Subject</th><th>Status</th><th>Agent</th></tr></thead><tbody id="ana-tbody"></tbody></table>
+        </div>
+      </div>
+      <div class="section"><h3>Activity Log</h3><div class="log" id="ana-log"></div></div>
+    </div>
+
+    <!-- PDF RULES -->
+    <div class="panel" id="panel-rules">
+      <div class="panel-title">PDF Rules</div>
+      <div class="panel-desc">Upload PDF files with rules for email content, timing, and follow-up behavior. Agents follow these rules when generating outreach.</div>
+      <div class="section">
+        <h3>Upload Rules</h3>
+        <div class="row">
+          <input type="file" id="rules-file" accept=".pdf,.txt" style="flex:3;background:var(--bg);color:var(--cyan);border:1px solid var(--border);border-radius:6px;padding:8px">
+          <button onclick="uploadRules()" id="rules-upload-btn">Upload</button>
+        </div>
+      </div>
+      <div class="section">
+        <h3>Active Rules</h3>
+        <div id="rules-list" class="log" style="min-height:60px">No rules uploaded yet</div>
+      </div>
+      <div class="section"><h3>Activity Log</h3><div class="log" id="rules-log"></div></div>
+    </div>
+
+    <!-- CUSTOM PIPELINES -->
+    <div class="panel" id="panel-custom-pipes">
+      <div class="panel-title">Custom Pipeline Builder</div>
+      <div class="panel-desc">Create custom pipelines by selecting agents and defining execution order. Admin-approved pipelines appear in the Pipelines panel.</div>
+      <div class="section">
+        <h3>Create Pipeline</h3>
+        <div class="row">
+          <div class="field" style="flex:2"><label>Pipeline Name</label><input type="text" id="cp-name" placeholder="e.g. Real Estate Campaign"></div>
+          <div class="field" style="flex:3"><label>Description</label><input type="text" id="cp-desc" placeholder="What this pipeline does"></div>
+        </div>
+        <div class="section" style="background:var(--bg);border-radius:6px;padding:12px;margin-top:8px">
+          <h3 style="margin-bottom:8px">Agent Steps (drag to reorder, click X to remove)</h3>
+          <div id="cp-steps"></div>
+          <div class="row" style="margin-top:8px">
+            <select id="cp-agent-select" style="flex:2">
+              <option value="">-- Select Agent --</option>
+              <option value="LeadScoutAgent">Lead Scout</option>
+              <option value="OutreachAgent">Outreach</option>
+              <option value="FollowupAgent">Followup</option>
+              <option value="AppointmentAgent">Appointment</option>
+              <option value="DealCloserAgent">Deal Closer</option>
+              <option value="ReportAgent">Report</option>
+              <option value="SystemCheckerAgent">System Checker</option>
+            </select>
+            <button onclick="addStep()" class="btn-green" style="flex:.5">+ Add Step</button>
+          </div>
+        </div>
+        <div class="row" style="margin-top:12px">
+          <button onclick="createCustomPipeline()" id="cp-create-btn">Create Pipeline</button>
+        </div>
+      </div>
+      <div class="section">
+        <h3>Your Custom Pipelines</h3>
+        <div class="tbl-wrap">
+          <table><thead><tr><th>Name</th><th>Steps</th><th>Created</th><th>Status</th><th>Action</th></tr></thead><tbody id="cp-tbody"></tbody></table>
+        </div>
+      </div>
+      <div class="section"><h3>Activity Log</h3><div class="log" id="cp-log"></div></div>
+    </div>
+
+    <!-- PENDING CHANGES -->
+    <div class="panel" id="panel-pending">
+      <div class="panel-title">Pending Changes</div>
+      <div class="panel-desc">Review and approve changes submitted by normal users. Only visible to admins.</div>
+      <div class="section">
+        <div class="tbl-wrap">
+          <table><thead><tr><th>ID</th><th>User</th><th>Action</th><th>Target</th><th>Submitted</th><th>Action</th></tr></thead><tbody id="pend-tbody"></tbody></table>
+        </div>
+      </div>
+      <div class="section"><h3>Activity Log</h3><div class="log" id="pend-log"></div></div>
+    </div>
+
   </div>
 </div>
 
 <script>
 const API = '';
+
+function fmtDate(ts) {
+  if (!ts) return '';
+  try {
+    const d = new Date(typeof ts === 'number' ? ts * 1000 : ts);
+    return d.toLocaleString();
+  } catch(e) { return ts; }
+}
 
 function showPanel(name) {
   document.querySelectorAll('.panel').forEach(p => p.classList.remove('active'));
@@ -672,6 +783,192 @@ function markManualReply() {
     }
   });
 }
+
+// ========== AUTH ==========
+let currentUser = null;
+
+function checkAuth() {
+  fetch(API+'/api/auth/me').then(r=>{
+    if (!r.ok) { window.location.href = '/login'; return r.json(); }
+    return r.json();
+  }).then(d=>{
+    if (!d || d.detail) { window.location.href = '/login'; return; }
+    currentUser = d;
+    document.getElementById('user-info').textContent = d.username + ' (' + d.role + ')';
+    document.getElementById('user-info').style.color = d.role==='admin'?'#5EEAFF':'#A6E3A1';
+    if (d.role === 'admin') {
+      document.getElementById('nav-pending').style.display = '';
+      loadPendingChanges();
+    }
+    loadAnalytics();
+    loadRules();
+    loadCustomPipelines();
+  }).catch(()=>{ window.location.href = '/login'; });
+}
+
+function logout() {
+  fetch(API+'/api/auth/logout',{method:'POST'}).then(()=>{ window.location.href='/login'; });
+}
+
+// ========== ANALYTICS ==========
+function loadAnalytics() {
+  fetch(API+'/api/analytics/emails').then(r=>r.json()).then(d=>{
+    document.getElementById('ana-sent').textContent = d.total_sent||0;
+    document.getElementById('ana-replies').textContent = d.total_replies||0;
+    document.getElementById('ana-response-rate').textContent = (d.response_rate||0)+'%';
+    document.getElementById('ana-bounced').textContent = d.total_bounced||0;
+    document.getElementById('ana-complained').textContent = d.total_complained||0;
+    document.getElementById('ana-failed').textContent = d.total_failed||0;
+    document.getElementById('ana-delivered').textContent = d.total_delivered||0;
+    let html = '';
+    (d.recent||[]).forEach(r=>{
+      html += '<tr><td style="color:#7D93B8">'+fmtDate(r.sent_at)+'</td><td>'+r.to_email+'</td><td>'+r.subject+'</td><td><span style="color:'+(r.status==='sent'?'#A6E3A1':r.status==='replied'?'#5EEAFF':'#FFB86C')+'">'+r.status+'</span></td><td style="color:#7D93B8">'+(r.agent||'OutreachAgent')+'</td></tr>';
+    });
+    document.getElementById('ana-tbody').innerHTML = html || '<tr><td colspan="5" style="color:#7D93B8">No emails sent yet</td></tr>';
+    log('ana-log', 'Analytics loaded: '+d.total_sent+' sent, '+d.total_replies+' replies', 'ok');
+  });
+}
+
+// ========== PDF RULES ==========
+function uploadRules() {
+  const file = document.getElementById('rules-file').files[0];
+  if (!file) { alert('Select a file first'); return; }
+  setBtn('rules-upload-btn', true);
+  const fd = new FormData();
+  fd.append('file', file);
+  fetch(API+'/api/rules/upload', {method:'POST', body:fd}).then(r=>r.json()).then(d=>{
+    setBtn('rules-upload-btn', false);
+    if (d.success) {
+      log('rules-log', 'Uploaded: '+file.filename+' (ID: '+d.rule_id+')', 'ok');
+      loadRules();
+    } else {
+      log('rules-log', 'Upload failed: '+JSON.stringify(d), 'err');
+    }
+  }).catch(e=>{ setBtn('rules-upload-btn', false); log('rules-log', 'ERROR: '+e, 'err'); });
+}
+
+function loadRules() {
+  fetch(API+'/api/rules/active').then(r=>r.json()).then(d=>{
+    if (d.message || !d || !d.filename) { document.getElementById('rules-list').textContent = d.message || 'No rules uploaded yet'; return; }
+    document.getElementById('rules-list').innerHTML = '<span style="color:#5EEAFF">'+d.filename+'</span> — uploaded '+fmtDate(d.uploaded_at)+' by user #'+d.uploaded_by+'\nContent length: '+((d.content||'').length)+' chars';
+  });
+}
+
+// ========== CUSTOM PIPELINES ==========
+let cpSteps = [];
+
+function addStep() {
+  const sel = document.getElementById('cp-agent-select');
+  const val = sel.value;
+  if (!val) return;
+  cpSteps.push(val);
+  sel.value = '';
+  renderSteps();
+}
+
+function removeStep(i) {
+  cpSteps.splice(i,1);
+  renderSteps();
+}
+
+function moveStep(i,dir) {
+  const j = i+dir;
+  if (j<0||j>=cpSteps.length) return;
+  [cpSteps[i],cpSteps[j]]=[cpSteps[j],cpSteps[i]];
+  renderSteps();
+}
+
+function renderSteps() {
+  let html = '';
+  cpSteps.forEach((s,i)=>{
+    html += '<div style="display:flex;align-items:center;gap:6px;margin-bottom:4px;background:var(--panel2);padding:6px 10px;border-radius:4px;border:1px solid var(--border)">';
+    html += '<span style="color:#7D93B8;font-size:11px;width:16px">'+(i+1)+'</span>';
+    html += '<span style="flex:1;color:#EAF2FF">'+s+'</span>';
+    html += '<button onclick="moveStep('+i+',-1)" style="padding:2px 6px;font-size:10px;background:var(--bg);border:1px solid var(--border);color:#7D93B8;cursor:pointer;border-radius:3px">↑</button>';
+    html += '<button onclick="moveStep('+i+',1)" style="padding:2px 6px;font-size:10px;background:var(--bg);border:1px solid var(--border);color:#7D93B8;cursor:pointer;border-radius:3px">↓</button>';
+    html += '<button onclick="removeStep('+i+')" style="padding:2px 6px;font-size:10px;background:var(--bg);border:1px solid var(--red);color:#FF6B81;cursor:pointer;border-radius:3px">X</button>';
+    html += '</div>';
+  });
+  document.getElementById('cp-steps').innerHTML = html || '<div style="color:#7D93B8;font-size:12px">No steps added yet. Select agents below.</div>';
+}
+
+function createCustomPipeline() {
+  const name = document.getElementById('cp-name').value.trim();
+  const desc = document.getElementById('cp-desc').value.trim();
+  if (!name) { alert('Enter a pipeline name'); return; }
+  if (!cpSteps.length) { alert('Add at least one step'); return; }
+  setBtn('cp-create-btn', true);
+  fetch(API+'/api/pipelines/custom', {
+    method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({name:name, description:desc, steps:cpSteps})
+  }).then(r=>r.json()).then(d=>{
+    setBtn('cp-create-btn', false);
+    if (d.pending) {
+      log('cp-log', 'Submitted for admin approval (ID: '+d.change_id+')', 'warn');
+    } else {
+      log('cp-log', 'Pipeline created: '+name+' (ID: '+d.pipeline_id+')', 'ok');
+      cpSteps = [];
+      renderSteps();
+      document.getElementById('cp-name').value = '';
+      document.getElementById('cp-desc').value = '';
+    }
+    loadCustomPipelines();
+  }).catch(e=>{ setBtn('cp-create-btn', false); log('cp-log', 'ERROR: '+e, 'err'); });
+}
+
+function loadCustomPipelines() {
+  fetch(API+'/api/pipelines/custom').then(r=>r.json()).then(d=>{
+    let html = '';
+    (d||[]).forEach(p=>{
+      html += '<tr><td>'+p.name+'</td><td style="color:#7D93B8">'+(p.steps||[]).join(' → ')+'</td><td style="color:#7D93B8">'+p.created_at+'</td><td><span style="color:'+(p.active?'#A6E3A1':'#FFB86C')+'">'+(p.active?'Active':'Inactive')+'</span></td><td>';
+      if (currentUser && currentUser.role==='admin') {
+        html += '<button onclick="deletePipeline('+p.id+')" style="padding:2px 8px;font-size:11px;background:var(--bg);border:1px solid var(--red);color:#FF6B81;cursor:pointer;border-radius:3px">Delete</button>';
+      }
+      html += '</td></tr>';
+    });
+    document.getElementById('cp-tbody').innerHTML = html || '<tr><td colspan="5" style="color:#7D93B8">No custom pipelines yet</td></tr>';
+  });
+}
+
+function deletePipeline(id) {
+  if (!confirm('Delete this pipeline?')) return;
+  fetch(API+'/api/pipelines/custom/'+id, {method:'DELETE'}).then(r=>r.json()).then(d=>{
+    log('cp-log', 'Pipeline deleted', 'ok');
+    loadCustomPipelines();
+  });
+}
+
+// ========== PENDING CHANGES ==========
+function loadPendingChanges() {
+  fetch(API+'/api/pending/all').then(r=>r.json()).then(d=>{
+    let html = '';
+    (d||[]).forEach(p=>{
+      const color = p.status==='pending'?'#FFB86C':p.status==='approved'?'#A6E3A1':'#FF6B81';
+      html += '<tr><td>'+p.id+'</td><td style="color:#7D93B8">'+p.username+'</td><td>'+p.action+'</td><td>'+p.target+'</td><td style="color:#7D93B8">'+fmtDate(p.created_at)+'</td><td>';
+      if (p.status==='pending' && currentUser && currentUser.role==='admin') {
+        html += '<button onclick="reviewChange('+p.id+',true)" style="padding:2px 8px;font-size:11px;background:var(--bg);border:1px solid var(--green);color:#A6E3A1;cursor:pointer;border-radius:3px;margin-right:4px">Approve</button>';
+        html += '<button onclick="reviewChange('+p.id+',false)" style="padding:2px 8px;font-size:11px;background:var(--bg);border:1px solid var(--red);color:#FF6B81;cursor:pointer;border-radius:3px">Reject</button>';
+      } else {
+        html += '<span style="color:'+color+'">'+p.status+'</span>';
+      }
+      html += '</td></tr>';
+    });
+    document.getElementById('pend-tbody').innerHTML = html || '<tr><td colspan="6" style="color:#7D93B8">No pending changes</td></tr>';
+    const count = (d||[]).filter(p=>p.status==='pending').length;
+    const badge = document.getElementById('pending-badge');
+    if (count > 0) { badge.textContent = count; badge.style.display = ''; } else { badge.style.display = 'none'; }
+  });
+}
+
+function reviewChange(id, approved) {
+  fetch(API+'/api/pending/'+id+'/'+(approved?'approve':'reject'), {method:'POST'}).then(r=>r.json()).then(d=>{
+    log('pend-log', 'Change #'+id+' '+(approved?'approved':'rejected'), approved?'ok':'err');
+    loadPendingChanges();
+  });
+}
+
+// ========== INIT ==========
+checkAuth();
 </script>
 </body>
 </html>
