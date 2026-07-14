@@ -1611,6 +1611,18 @@ function startGmailAuth() {
     if (d.available && d.auth_url) {
       window.open(d.auth_url, '_blank', 'width=600,height=700');
       log('gmail-log', 'OAuth window opened. Complete authorization and come back.', 'info');
+      // Poll for token to appear
+      let tries = 0;
+      const iv = setInterval(() => {
+        if (++tries > 60) { clearInterval(iv); return; }
+        fetch(API+'/api/gmail/status').then(r=>r.json()).then(s=>{
+          if (s.has_token && s.authorized) {
+            clearInterval(iv);
+            log('gmail-log', 'Gmail API authorized successfully!', 'good');
+            gmailStatus(); // refresh status display
+          }
+        }).catch(()=>{});
+      }, 3000);
     } else {
       log('gmail-log', d.error||'Cannot start auth', 'err');
     }
