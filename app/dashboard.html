@@ -102,6 +102,10 @@ tr:hover td{background:var(--panel2)}
     <div class="nav-item" onclick="showPanel('custom-pipes')" id="nav-custom-pipes"><span class="dot-s"></span> Custom Pipes</div>
     <div class="nav-item" onclick="showPanel('pending')" id="nav-pending" style="display:none"><span class="dot-s"></span> Pending <span id="pending-badge" style="background:#FF6B81;color:#fff;border-radius:8px;padding:1px 6px;font-size:10px;margin-left:4px;display:none">0</span></div>
     <div class="nav-item" onclick="showPanel('apikeys')" id="nav-apikeys"><span class="dot-s"></span> API Keys</div>
+    <div class="nav-item" onclick="showPanel('campaigns')" id="nav-campaigns"><span class="dot-s"></span> Campaigns</div>
+    <div class="nav-item" onclick="showPanel('scheduler')" id="nav-scheduler"><span class="dot-s"></span> Scheduler</div>
+    <div class="nav-item" onclick="showPanel('daemon')" id="nav-daemon"><span class="dot-s"></span> Daemon</div>
+    <div class="nav-item" onclick="showPanel('deliverability')" id="nav-deliverability"><span class="dot-s"></span> Deliverability</div>
   </div>
 
   <div class="content">
@@ -431,6 +435,118 @@ tr:hover td{background:var(--panel2)}
       <div class="section"><h3>Activity Log</h3><div class="log" id="pend-log"></div></div>
     </div>
 
+    <!-- CAMPAIGNS -->
+    <div class="panel" id="panel-campaigns">
+      <div class="panel-title">Campaign Manager</div>
+      <div class="panel-desc">Create multi-step outreach campaigns with scheduling and auto-enrollment.</div>
+      <div class="section">
+        <h3>Create Campaign</h3>
+        <div class="row">
+          <div class="field"><label>Campaign Name</label><input type="text" id="cmp-name" placeholder="e.g. HVAC Outreach Q1"></div>
+          <div class="field"><label>Target Lead Type</label><input type="text" id="cmp-target" placeholder="e.g. hvac"></div>
+        </div>
+        <div class="row">
+          <div class="field"><label>Agent</label><select id="cmp-agent"><option value="outreach">Outreach</option><option value="followup">Followup</option><option value="appointment">Appointment</option><option value="deal_closer">Deal Closer</option></select></div>
+          <div class="field"><label>Interval (seconds)</label><input type="number" id="cmp-interval" value="3600"></div>
+        </div>
+        <div class="row">
+          <button onclick="createCampaign()">Create Campaign</button>
+          <span id="cmp-status"></span>
+        </div>
+      </div>
+      <div class="section">
+        <h3>Active Campaigns</h3>
+        <div class="tbl-wrap">
+          <table><thead><tr><th>Name</th><th>Target</th><th>Agent</th><th>Interval</th><th>Active</th><th>Actions</th></tr></thead><tbody id="cmp-tbody"></tbody></table>
+        </div>
+      </div>
+      <div class="section"><h3>Activity Log</h3><div class="log" id="cmp-log"></div></div>
+    </div>
+
+    <!-- SCHEDULER -->
+    <div class="panel" id="panel-scheduler">
+      <div class="panel-title">Agent Scheduler</div>
+      <div class="panel-desc">Schedule agents to run at fixed intervals. Daemon processes all schedules.</div>
+      <div class="section">
+        <h3>Create Schedule</h3>
+        <div class="row">
+          <div class="field"><label>Schedule Name</label><input type="text" id="sch-name" placeholder="e.g. Hourly Outreach"></div>
+          <div class="field"><label>Agent</label><select id="sch-agent"><option value="outreach">Outreach</option><option value="followup">Followup</option><option value="appointment">Appointment</option><option value="deal_closer">Deal Closer</option><option value="report">Report</option></select></div>
+        </div>
+        <div class="row">
+          <div class="field"><label>Interval (seconds)</label><input type="number" id="sch-interval" value="3600"></div>
+          <button onclick="createSchedule()">Create Schedule</button>
+        </div>
+      </div>
+      <div class="section">
+        <h3>Active Schedules</h3>
+        <div class="tbl-wrap">
+          <table><thead><tr><th>Name</th><th>Agent</th><th>Interval</th><th>Active</th><th>Last Run</th><th>Actions</th></tr></thead><tbody id="sch-tbody"></tbody></table>
+        </div>
+      </div>
+      <div class="section"><h3>Activity Log</h3><div class="log" id="sch-log"></div></div>
+    </div>
+
+    <!-- DAEMON -->
+    <div class="panel" id="panel-daemon">
+      <div class="panel-title">Background Daemon</div>
+      <div class="panel-desc">Always-running background process: scans for replies, runs campaign steps, processes scheduled agents.</div>
+      <div class="section">
+        <h3>Status</h3>
+        <div class="row">
+          <div id="daemon-status-pill"></div>
+          <div id="daemon-info" style="font-size:13px;color:var(--muted);margin-left:10px"></div>
+        </div>
+        <div class="row" style="margin-top:10px">
+          <button onclick="daemonAction('start')" class="btn-green">Start</button>
+          <button onclick="daemonAction('stop')" class="btn-red">Stop</button>
+          <button onclick="daemonAction('restart')">Restart</button>
+        </div>
+      </div>
+      <div class="section">
+        <h3>Recent Log</h3>
+        <div class="log" id="daemon-log" style="max-height:300px">Loading...</div>
+      </div>
+    </div>
+
+    <!-- DELIVERABILITY -->
+    <div class="panel" id="panel-deliverability">
+      <div class="panel-title">Email Deliverability</div>
+      <div class="panel-desc">Monitor email health, verify addresses, check spam scores, and manage rate limits.</div>
+      <div class="section">
+        <h3>Email Health Overview</h3>
+        <div class="row">
+          <div class="stat-chip" style="flex:1;text-align:center"><div style="font-size:22px;font-weight:700;color:#5EEAFF" id="del-sent">0</div><div style="font-size:11px;color:#7D93B8">Sent Today</div></div>
+          <div class="stat-chip" style="flex:1;text-align:center"><div style="font-size:22px;font-weight:700;color:#A6E3A1" id="del-rate">0%</div><div style="font-size:11px;color:#7D93B8">Delivery Rate</div></div>
+          <div class="stat-chip" style="flex:1;text-align:center"><div style="font-size:22px;font-weight:700;color:#FF6B81" id="del-bounce">0%</div><div style="font-size:11px;color:#7D93B8">Bounce Rate</div></div>
+          <div class="stat-chip" style="flex:1;text-align:center"><div style="font-size:22px;font-weight:700;color:#FFB86C" id="del-open">0%</div><div style="font-size:11px;color:#7D93B8">Open Rate</div></div>
+        </div>
+      </div>
+      <div class="section">
+        <h3>Verify Email Address</h3>
+        <div class="row">
+          <div class="field" style="flex:3"><input type="email" id="del-verify-email" placeholder="test@example.com"></div>
+          <button onclick="verifyEmail()">Verify</button>
+        </div>
+        <div id="del-verify-result" style="font-size:12px;margin-top:6px"></div>
+      </div>
+      <div class="section">
+        <h3>Spam Score Check</h3>
+        <textarea id="del-spam-text" rows="3" placeholder="Paste email content to check spam score..."></textarea>
+        <div class="row" style="margin-top:8px">
+          <button onclick="checkSpam()">Check Spam Score</button>
+          <span id="del-spam-result"></span>
+        </div>
+      </div>
+      <div class="section">
+        <h3>Rate Limiter</h3>
+        <div class="row">
+          <div id="del-rate-info" style="font-size:13px;color:var(--muted)">Loading...</div>
+        </div>
+      </div>
+      <div class="section"><h3>Activity Log</h3><div class="log" id="del-log"></div></div>
+    </div>
+
   </div>
 </div>
 
@@ -450,6 +566,11 @@ function showPanel(name) {
   document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
   document.getElementById('panel-'+name).classList.add('active');
   document.getElementById('nav-'+name).classList.add('active');
+  // Load panel data on switch
+  if (name==='campaigns') loadCampaigns();
+  if (name==='scheduler') loadSchedules();
+  if (name==='daemon') loadDaemon();
+  if (name==='deliverability') loadDeliverability();
 }
 
 function log(el, text, tag) {
@@ -1085,8 +1206,166 @@ function reviewChange(id, approved) {
   });
 }
 
+// ========== CAMPAIGNS ==========
+function createCampaign() {
+  const name = document.getElementById('cmp-name').value.trim();
+  const target = document.getElementById('cmp-target').value.trim();
+  const agent = document.getElementById('cmp-agent').value;
+  const interval = parseInt(document.getElementById('cmp-interval').value)||3600;
+  if (!name) { document.getElementById('cmp-status').innerHTML='<span class="pill pill-err">Enter name</span>'; return; }
+  fetch(API+'/api/campaigns', {
+    method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({name:name, target:target, agent:agent, interval_seconds:interval, steps:[{agent:agent,config:{}}]})
+  }).then(r=>r.json()).then(d=>{
+    if (d.campaign_id) { document.getElementById('cmp-status').innerHTML='<span class="pill pill-ok">Created</span>'; loadCampaigns(); }
+    else { document.getElementById('cmp-status').innerHTML='<span class="pill pill-err">'+(d.error||'Failed')+'</span>'; }
+  });
+}
+
+function loadCampaigns() {
+  fetch(API+'/api/campaigns').then(r=>r.json()).then(d=>{
+    let html = '';
+    (d||[]).forEach(c=>{
+      html += '<tr><td>'+c.name+'</td><td style="color:var(--muted)">'+(c.target||'')+'</td><td>'+c.agent+'</td><td style="color:var(--muted)">'+c.interval_seconds+'s</td><td><span class="pill '+(c.active?'pill-ok':'pill-off')+'">'+(c.active?'Active':'Paused')+'</span></td><td>';
+      html += '<button onclick="toggleCampaign('+c.id+','+(!c.active)+')" style="padding:2px 8px;font-size:11px;background:var(--bg);border:1px solid var(--border);color:var(--cyan);cursor:pointer;border-radius:3px;margin-right:4px">'+(c.active?'Pause':'Resume')+'</button>';
+      html += '<button onclick="runCampaignNow('+c.id+')" class="btn-green" style="padding:2px 8px;font-size:11px">Run Now</button>';
+      html += '</td></tr>';
+    });
+    document.getElementById('cmp-tbody').innerHTML = html || '<tr><td colspan="6" style="color:var(--muted)">No campaigns yet</td></tr>';
+  });
+}
+
+function toggleCampaign(id, active) {
+  fetch(API+'/api/campaigns/'+id+'/toggle', {method:'POST'}).then(r=>r.json()).then(d=>{
+    log('cmp-log', 'Campaign #'+id+(active?' activated':' paused'), 'ok');
+    loadCampaigns();
+  });
+}
+
+function runCampaignNow(id) {
+  fetch(API+'/api/campaigns/'+id+'/run-now', {method:'POST'}).then(r=>r.json()).then(d=>{
+    log('cmp-log', d.message||d.error||'Campaign triggered', d.message?'ok':'err');
+  });
+}
+
+// ========== SCHEDULER ==========
+function createSchedule() {
+  const name = document.getElementById('sch-name').value.trim();
+  const agent = document.getElementById('sch-agent').value;
+  const interval = parseInt(document.getElementById('sch-interval').value)||3600;
+  if (!name) { log('sch-log','Enter a name','err'); return; }
+  fetch(API+'/api/schedules', {
+    method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({name:name, agent:agent, interval_seconds:interval})
+  }).then(r=>r.json()).then(d=>{
+    if (d.schedule_id) { log('sch-log','Schedule created: '+name,'ok'); loadSchedules(); }
+    else { log('sch-log', d.error||'Failed','err'); }
+  });
+}
+
+function loadSchedules() {
+  fetch(API+'/api/schedules').then(r=>r.json()).then(d=>{
+    let html = '';
+    (d||[]).forEach(s=>{
+      html += '<tr><td>'+s.name+'</td><td>'+s.agent+'</td><td style="color:var(--muted)">'+s.interval_seconds+'s</td><td><span class="pill '+(s.active?'pill-ok':'pill-off')+'">'+(s.active?'Active':'Paused')+'</span></td><td style="color:var(--muted)">'+fmtDate(s.last_run_at)+'</td><td>';
+      html += '<button onclick="toggleSchedule('+s.id+')" style="padding:2px 8px;font-size:11px;background:var(--bg);border:1px solid var(--border);color:var(--cyan);cursor:pointer;border-radius:3px;margin-right:4px">'+(s.active?'Pause':'Resume')+'</button>';
+      html += '<button onclick="runScheduleNow('+s.id+')" class="btn-green" style="padding:2px 8px;font-size:11px">Run Now</button>';
+      html += '</td></tr>';
+    });
+    document.getElementById('sch-tbody').innerHTML = html || '<tr><td colspan="6" style="color:var(--muted)">No schedules yet</td></tr>';
+  });
+}
+
+function toggleSchedule(id) {
+  fetch(API+'/api/schedules/'+id+'/toggle', {method:'POST'}).then(r=>r.json()).then(d=>{
+    log('sch-log','Schedule #'+id+' toggled','ok'); loadSchedules();
+  });
+}
+
+function runScheduleNow(id) {
+  fetch(API+'/api/schedules/'+id+'/run-now', {method:'POST'}).then(r=>r.json()).then(d=>{
+    log('sch-log', d.message||d.error||'Run triggered', d.message?'ok':'err');
+  });
+}
+
+// ========== DAEMON ==========
+function loadDaemon() {
+  fetch(API+'/api/daemon/status').then(r=>r.json()).then(d=>{
+    const pill = document.getElementById('daemon-status-pill');
+    const info = document.getElementById('daemon-info');
+    if (d.running) {
+      pill.innerHTML='<span class="pill pill-ok" style="font-size:14px;padding:4px 12px">RUNNING</span>';
+      info.textContent='Interval: '+d.interval_seconds+'s | Reply scan: every '+d.reply_scan_interval+'s';
+    } else {
+      pill.innerHTML='<span class="pill pill-err" style="font-size:14px;padding:4px 12px">STOPPED</span>';
+      info.textContent='Daemon is not running.';
+    }
+  }).catch(function() {
+    document.getElementById('daemon-status-pill').innerHTML='<span class="pill pill-off">UNKNOWN</span>';
+  });
+  // Load log
+  fetch(API+'/api/daemon/log?limit=15').then(r=>r.json()).then(d=>{
+    let html = '';
+    (d||[]).forEach(e=>{
+      html += '<div style="border-bottom:1px solid #243252;padding:4px 0"><span style="color:#7D93B8">'+fmtDate(e.created_at)+'</span> <span style="color:#5EEAFF">'+(e.event||'')+'</span> <span style="color:#EAF2FF">'+(e.details||'').substring(0,100)+'</span></div>';
+    });
+    document.getElementById('daemon-log').innerHTML = html || '<div style="color:var(--muted)">No log entries yet</div>';
+  });
+}
+
+function daemonAction(action) {
+  fetch(API+'/api/daemon/'+action, {method:'POST'}).then(r=>r.json()).then(d=>{
+    log('daemon-log', d.message||action+' performed', d.message?'ok':'err');
+    setTimeout(loadDaemon, 500);
+  });
+}
+
+// ========== DELIVERABILITY ==========
+function loadDeliverability() {
+  fetch(API+'/api/email/health').then(r=>r.json()).then(d=>{
+    document.getElementById('del-sent').textContent = d.sent_today||0;
+    document.getElementById('del-rate').textContent = (d.delivery_rate||0).toFixed(1)+'%';
+    document.getElementById('del-bounce').textContent = (d.bounce_rate||0).toFixed(1)+'%';
+    document.getElementById('del-open').textContent = (d.open_rate||0).toFixed(1)+'%';
+  });
+  fetch(API+'/api/email/rate-status').then(r=>r.json()).then(d=>{
+    document.getElementById('del-rate-info').textContent = 'Daily: '+(d.daily_sent||0)+'/'+(d.daily_limit||0)+' | Hourly: '+(d.hourly_sent||0)+'/'+(d.hourly_limit||0)+' | Last delay: '+(d.last_delay_seconds||0).toFixed(0)+'s';
+  });
+}
+
+function verifyEmail() {
+  const email = document.getElementById('del-verify-email').value.trim();
+  if (!email) return;
+  document.getElementById('del-verify-result').innerHTML='<span class="spinner"></span> Verifying...';
+  fetch(API+'/api/email/verify', {
+    method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({email:email})
+  }).then(r=>r.json()).then(d=>{
+    if (d.error) { document.getElementById('del-verify-result').innerHTML='<span class="pill pill-err">'+d.error+'</span>'; return; }
+    const safe = d.safe_to_send;
+    document.getElementById('del-verify-result').innerHTML='<span class="pill '+(safe?'pill-ok':'pill-err')+'">'+(safe?'SAFE':'RISKY')+'</span> '+d.reason+' (score: '+d.score+')';
+  });
+}
+
+function checkSpam() {
+  const text = document.getElementById('del-spam-text').value.trim();
+  if (!text) return;
+  document.getElementById('del-spam-result').innerHTML='<span class="spinner"></span>';
+  fetch(API+'/api/email/check-spam', {
+    method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({content:text})
+  }).then(r=>r.json()).then(d=>{
+    const score = d.score||0;
+    const cls = score>=80?'pill-ok':score>=60?'pill-off':'pill-err';
+    document.getElementById('del-spam-result').innerHTML='<span class="pill '+cls+'">Score: '+score+'/100</span>';
+    if (d.issues && d.issues.length) document.getElementById('del-spam-result').innerHTML += ' <span style="font-size:11px;color:var(--muted)">'+d.issues.join(', ')+'</span>';
+  });
+}
+
 // ========== INIT ==========
 checkAuth();
+loadDaemon();
+loadDeliverability();
 </script>
 </body>
 </html>

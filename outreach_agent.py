@@ -3,34 +3,28 @@ outreach_agent.py — DEUS 3.0
 ==============================
 Sends the first outreach message to leads via email or other channels.
 
+Integrates with the deliverability infrastructure:
+  - email_sender: Unified SMTP/Gmail API/Resend fallback
+  - email_verifier: Pre-send email verification
+  - spam_checker: Content anti-spam scoring
+  - send_limiter: Rate limiting and daily caps
+  - outreach_config: AI email toggle and style settings
+
 Two modes:
   - preview: Returns leads ready for outreach, asks user to confirm
   - send:    Sends emails to the confirmed lead IDs only
 
-Reads:  leads (database), outreach_style_config.json, smtp_profiles.json
-Writes: leads (database), outreach_log.json (append-only log)
+Reads:  leads (database), outreach_style_config.json
+Writes: leads (database), email_log (database)
 """
 
 import os
 import json
 import logging
-import smtplib
-import ssl
 import time
-from email.mime.multipart import MIMEMultipart
-from email.mime.text import MIMEText
-from dotenv import load_dotenv
-
-try:
-    import resend
-    RESEND_AVAILABLE = True
-except ImportError:
-    RESEND_AVAILABLE = False
 
 from base_agent import BaseAgent, AgentResult, AgentHealth, make_result, make_health
 from reply_detector import EmailTracker
-
-load_dotenv()
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
 logger = logging.getLogger(__name__)
@@ -40,10 +34,6 @@ from outreach_config import (
     get_default_smtp_profile, get_smtp_profile, SmtpProfile,
 )
 
-ENV_SMTP_EMAIL = os.getenv("SMTP_EMAIL", "")
-ENV_SMTP_PASSWORD = os.getenv("SMTP_PASSWORD", "")
-
-LEADS_FILE = "leads.json"
 OUTREACH_LOG_FILE = "outreach_log.json"
 
 
@@ -55,7 +45,6 @@ class OutreachAgent(BaseAgent):
 
     def __init__(self, smtp_profile_name: str = None):
         self.client = None
-        self.resend_client = None
         self.style = load_style_config()
 
         groq_key = os.getenv("GROQ_API_KEY", "")
@@ -66,11 +55,11 @@ class OutreachAgent(BaseAgent):
             except Exception as e:
                 logger.warning("Groq init failed: %s", e)
 
-        resend_key = os.getenv("RESEND_API_KEY", "")
-        if resend_key and RESEND_AVAILABLE:
-            resend.api_key = resend_key
-            self.resend_client = True
-            logger.info("Resend API initialized — will use HTTP email sending")
+        # Initialize deliverability modules
+        self._email_sender = None
+        self._email_verifier = None
+        self._spam_checker = None
+        self._send_limiter = None
 
         profile = None
         if smtp_profile_name:
@@ -81,15 +70,43 @@ class OutreachAgent(BaseAgent):
         if profile is None:
             profile = get_default_smtp_profile()
 
-        if profile is None and ENV_SMTP_EMAIL and ENV_SMTP_PASSWORD:
+        if profile is None and os.getenv("SMTP_EMAIL") and os.getenv("SMTP_PASSWORD"):
             profile = SmtpProfile(
                 profile_name="env_default",
-                smtp_email=ENV_SMTP_EMAIL,
-                smtp_password=ENV_SMTP_PASSWORD,
+                smtp_email=os.getenv("SMTP_EMAIL"),
+                smtp_password=os.getenv("SMTP_PASSWORD"),
             )
 
         self.smtp_profile = profile
         self.tracker = EmailTracker()
+
+    def _get_email_sender(self):
+        """Lazy-load email sender."""
+        if self._email_sender is None:
+            from email_sender import get_email_sender
+            self._email_sender = get_email_sender(smtp_profile=self.smtp_profile)
+        return self._email_sender
+
+    def _get_email_verifier(self):
+        """Lazy-load email verifier."""
+        if self._email_verifier is None:
+            from email_verifier import EmailVerifier
+            self._email_verifier = EmailVerifier(check_smtp=False)
+        return self._email_verifier
+
+    def _get_spam_checker(self):
+        """Lazy-load spam checker."""
+        if self._spam_checker is None:
+            from spam_checker import SpamChecker
+            self._spam_checker = SpamChecker()
+        return self._spam_checker
+
+    def _get_send_limiter(self):
+        """Lazy-load send limiter."""
+        if self._send_limiter is None:
+            from send_limiter import get_send_limiter
+            self._send_limiter = get_send_limiter()
+        return self._send_limiter
 
     def think(self, prompt: str) -> str:
         if not self.client:
@@ -106,8 +123,12 @@ class OutreachAgent(BaseAgent):
             return ""
 
     def generate_outreach_message(self, lead: dict) -> str:
-        if self.style.use_custom_template and self.style.custom_template:
-            return render_custom_template(self.style.custom_template, lead, self.style.signature)
+        # If AI emails disabled or custom template set, use template
+        if not self.style.ai_email_enabled or (self.style.use_custom_template and self.style.custom_template):
+            if self.style.use_custom_template and self.style.custom_template:
+                return render_custom_template(self.style.custom_template, lead, self.style.signature)
+            # Fallback template when AI is off
+            return self._fallback_template(lead)
 
         niche = lead.get("niche", "their industry")
         business_name = lead.get("business_name", "there")
@@ -126,16 +147,25 @@ class OutreachAgent(BaseAgent):
         )
         message = self.think(task)
         if not message:
-            message = (
-                f"Hi {business_name} team,\n\n"
-                f"I'd like to share a quick business proposal relevant to your "
-                f"{niche} work. {self.style.call_to_action}\n\n"
-                f"Best regards"
-            )
+            message = self._fallback_template(lead)
 
         if self.style.signature:
             message = f"{message}\n\n{self.style.signature}"
 
+        return message
+
+    def _fallback_template(self, lead: dict) -> str:
+        """Generate a fallback template when AI is disabled or fails."""
+        business_name = lead.get("business_name", "there")
+        niche = lead.get("niche", "your industry")
+        message = (
+            f"Hi {business_name} team,\n\n"
+            f"I'd like to share a quick business proposal relevant to your "
+            f"{niche} work. {self.style.call_to_action}\n\n"
+            f"Best regards"
+        )
+        if self.style.signature:
+            message = f"{message}\n\n{self.style.signature}"
         return message
 
     def render_subject(self, lead: dict) -> str:
@@ -148,76 +178,45 @@ class OutreachAgent(BaseAgent):
             return f"Quick proposal for {lead.get('business_name', 'your business')}"
 
     def send_email(self, lead: dict, message: str) -> bool:
+        """Send email via the unified email sender with all checks."""
         to_email = lead.get("business_email", "")
         if not to_email:
             return False
+
         subject = self.render_subject(lead)
-        from_email = self.smtp_profile.smtp_email if self.smtp_profile else os.getenv("SMTP_EMAIL", "")
+        limiter = self._get_send_limiter()
 
-        # --- Try Resend API first (HTTP, works on Railway) ---
-        if self.resend_client and RESEND_AVAILABLE:
-            try:
-                params = {
-                    "from": f"DEUS <{from_email}>",
-                    "to": [to_email],
-                    "subject": subject,
-                    "text": message,
-                }
-                result = resend.Emails.send(params)
-                logger.info("Resend: email sent to %s (%s)", lead.get("business_name"), to_email)
-                return True
-            except Exception as e:
-                logger.warning("Resend failed for %s: %s — falling back to SMTP", to_email, e)
-
-        # --- Fallback: SMTP (works locally, blocked on Railway) ---
-        if self.smtp_profile is None:
-            logger.error("No SMTP profile and no Resend API — cannot send email to %s", to_email)
+        # Rate limit check
+        profile_name = self.smtp_profile.profile_name if self.smtp_profile else "default"
+        check = limiter.can_send(profile_name)
+        if not check["allowed"]:
+            logger.warning("Rate limit: %s", check["reason"])
             return False
 
-        try:
-            msg = MIMEMultipart()
-            msg["From"] = self.smtp_profile.smtp_email
-            msg["To"] = to_email
-            msg["Subject"] = subject
-            msg.attach(MIMEText(message, "plain"))
-
-            context = ssl.create_default_context()
-            host = self.smtp_profile.smtp_host
-            email_addr = self.smtp_profile.smtp_email
-            password = self.smtp_profile.smtp_password
-            timeout = 10
-
-            ports_to_try = [self.smtp_profile.smtp_port]
-            if 465 not in ports_to_try:
-                ports_to_try.append(465)
-            if 587 not in ports_to_try:
-                ports_to_try.append(587)
-
-            for port in ports_to_try:
-                try:
-                    if port == 465:
-                        with smtplib.SMTP_SSL(host, port, context=context, timeout=timeout) as server:
-                            server.login(email_addr, password)
-                            server.sendmail(email_addr, to_email, msg.as_string())
-                    else:
-                        with smtplib.SMTP(host, port, timeout=timeout) as server:
-                            server.ehlo()
-                            server.starttls(context=context)
-                            server.ehlo()
-                            server.login(email_addr, password)
-                            server.sendmail(email_addr, to_email, msg.as_string())
-                    logger.info("SMTP: email sent to %s (%s) via port %d",
-                                lead.get("business_name"), to_email, port)
-                    return True
-                except Exception as port_err:
-                    logger.warning("SMTP port %d failed for %s: %s", port, to_email, port_err)
-                    continue
-
-            logger.error("All SMTP ports failed for %s", to_email)
+        # Spam check
+        spam_checker = self._get_spam_checker()
+        spam_result = spam_checker.check_before_send(subject, message)
+        if not spam_result["should_send"]:
+            logger.warning("Spam check blocked email to %s (score=%d): %s",
+                          to_email, spam_result["score"], spam_result["issues"])
             return False
-        except Exception as e:
-            logger.error("Failed to send email to %s: %s", to_email, e)
-            return False
+
+        # Send via unified sender
+        sender = self._get_email_sender()
+        result = sender.send(
+            to=to_email,
+            subject=subject,
+            body=message,
+            lead_name=lead.get("business_name", ""),
+        )
+
+        if result["success"]:
+            limiter.record_send(profile_name)
+            logger.info("Email sent to %s via %s", to_email, result["method"])
+            return True
+
+        logger.warning("Email failed to %s: %s", to_email, result["message"])
+        return False
 
     def send_linkedin_message(self, lead: dict, message: str) -> bool:
         return False
@@ -297,6 +296,18 @@ class OutreachAgent(BaseAgent):
         preview_data = []
         for lead in candidates:
             resolved = self.resolve_channel(lead, lead.get("preferred_channel") or channel)
+
+            # Pre-check email deliverability
+            deliverability = {}
+            if resolved == "email" and lead.get("business_email"):
+                verifier = self._get_email_verifier()
+                verify_result = verifier.verify(lead["business_email"])
+                deliverability = {
+                    "email_valid": verify_result["valid"],
+                    "email_score": verify_result["score"],
+                    "email_warnings": verify_result["warnings"],
+                }
+
             preview_data.append({
                 "id": lead.get("id"),
                 "business_name": lead.get("business_name", "Unknown"),
@@ -305,11 +316,16 @@ class OutreachAgent(BaseAgent):
                 "niche": lead.get("niche", ""),
                 "channel": resolved or "none",
                 "has_email": bool(lead.get("business_email")),
+                **deliverability,
             })
+
+        # Get rate limit status
+        limiter = self._get_send_limiter()
+        rate_status = limiter.get_status(self.smtp_profile.profile_name if self.smtp_profile else "default")
 
         summary = f"Found {len(preview_data)} leads ready for outreach. Review and confirm to send."
         return make_result(True, summary, data=preview_data,
-                          stats={"candidates": len(preview_data)},
+                          stats={"candidates": len(preview_data), "rate_status": rate_status},
                           duration=time.time() - start)
 
     def _send_confirmed(self, kwargs: dict, start: float) -> AgentResult:
@@ -334,13 +350,24 @@ class OutreachAgent(BaseAgent):
 
         sent_count = 0
         failed_count = 0
+        skipped_count = 0
         log_entries = []
+
+        limiter = self._get_send_limiter()
 
         for lead in leads:
             resolved = self.resolve_channel(lead, channel)
             if resolved != "email":
                 failed_count += 1
                 continue
+
+            # Rate limit check
+            profile_name = self.smtp_profile.profile_name if self.smtp_profile else "default"
+            check = limiter.can_send(profile_name)
+            if not check["allowed"]:
+                logger.info("Rate limit reached, stopping send batch: %s", check["reason"])
+                skipped_count += len(leads) - (sent_count + failed_count)
+                break
 
             message = self.generate_outreach_message(lead)
             sent = self.send_email(lead, message)
@@ -377,8 +404,14 @@ class OutreachAgent(BaseAgent):
 
             self._append_outreach_log(log_entries)
 
-        summary = f"Sent: {sent_count} | Failed: {failed_count} | Total confirmed: {len(lead_ids)}"
-        stats = {"sent": sent_count, "failed": failed_count, "total": len(lead_ids)}
+        summary = f"Sent: {sent_count} | Failed: {failed_count} | Skipped (rate limit): {skipped_count} | Total: {len(lead_ids)}"
+        stats = {
+            "sent": sent_count,
+            "failed": failed_count,
+            "skipped": skipped_count,
+            "total": len(lead_ids),
+            "rate_status": limiter.get_status(profile_name),
+        }
         return make_result(True, summary, stats=stats, duration=time.time() - start)
 
     def _get_candidates_from_json(self, limit: int) -> list:
@@ -402,17 +435,10 @@ class OutreachAgent(BaseAgent):
 
     def _load_leads(self) -> list:
         try:
-            with open(LEADS_FILE, "r") as f:
+            with open("leads.json", "r") as f:
                 return json.load(f)
         except (FileNotFoundError, json.JSONDecodeError):
             return []
-
-    def _save_leads(self, leads: list) -> None:
-        try:
-            with open(LEADS_FILE, "w") as f:
-                json.dump(leads, f, indent=2)
-        except Exception as e:
-            logger.error("Failed to save %s: %s", LEADS_FILE, e)
 
     def _append_outreach_log(self, entries: list) -> None:
         if not entries:
@@ -431,23 +457,29 @@ class OutreachAgent(BaseAgent):
             logger.error("Failed to write %s: %s", OUTREACH_LOG_FILE, e)
 
     def report(self) -> str:
-        leads = self._load_leads()
-        contacted = sum(1 for l in leads if l.get("status") == "contacted")
-        failed = sum(1 for l in leads if l.get("status") == "send_failed")
         profile_name = self.smtp_profile.profile_name if self.smtp_profile else "none configured"
-        return f"Outreach Agent (SMTP: {profile_name}). Contacted: {contacted} | Failed: {failed}"
+        limiter = self._get_send_limiter()
+        status = limiter.get_status(self.smtp_profile.profile_name if self.smtp_profile else "default")
+        return (f"Outreach Agent (SMTP: {profile_name}). "
+                f"Today: {status['daily_sent']}/{status['daily_limit']} sent | "
+                f"AI emails: {'ON' if self.style.ai_email_enabled else 'OFF'}")
 
     def check_health(self) -> AgentHealth:
         keys = self._check_keys()
         groq_ok = keys.get("GROQ_API_KEY", False)
-        smtp_ok = bool(self.smtp_profile)
-        if groq_ok and smtp_ok:
-            return make_health(True, "ready", "Outreach agent ready (Groq + SMTP).", keys)
+        sender = self._get_email_sender()
+        health = sender.check_health()
+        email_ok = health.get("any_available", False)
+
+        if groq_ok and email_ok:
+            return make_health(True, "ready",
+                             f"Outreach agent ready. Email: {', '.join(k for k,v in health.items() if k != 'any_available' and isinstance(v, dict) and v.get('available'))}",
+                             {**keys, **{k: v.get("available", False) for k, v in health.items() if isinstance(v, dict)}})
         issues = []
         if not groq_ok:
             issues.append("GROQ_API_KEY not set")
-        if not smtp_ok:
-            issues.append("No SMTP profile configured")
+        if not email_ok:
+            issues.append("No email provider available (SMTP/Gmail API/Resend)")
         return make_health(True, "degraded", f"Degraded: {', '.join(issues)}", keys)
 
 

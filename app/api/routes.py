@@ -288,6 +288,7 @@ def get_outreach_config():
             "signature": s.signature,
             "use_custom_template": s.use_custom_template,
             "custom_template": s.custom_template,
+            "ai_email_enabled": s.ai_email_enabled,
         }
     except Exception:
         return {
@@ -296,6 +297,7 @@ def get_outreach_config():
             "call_to_action": "Would you be open to a quick 15-minute call this week?",
             "signature": "Best regards,\nGrowthDesk VA Team",
             "use_custom_template": False, "custom_template": "",
+            "ai_email_enabled": True,
         }
 
 
@@ -311,6 +313,7 @@ def save_outreach_config(cfg: dict):
             signature=cfg.get("signature", ""),
             use_custom_template=cfg.get("use_custom_template", False),
             custom_template=cfg.get("custom_template", ""),
+            ai_email_enabled=cfg.get("ai_email_enabled", True),
         ))
         return {"saved": True}
     except Exception as e:
@@ -711,11 +714,12 @@ def outreach_status(job_id: str):
 
 
 @router.get("/api/leads/list")
-def list_leads_db(status: str = None, limit: int = 500, offset: int = 0):
+def list_leads_db(status: str = None, lead_type: str = None,
+                  limit: int = 500, offset: int = 0):
     """List leads from the database."""
     try:
-        from app.database import get_leads
-        leads = get_leads(status=status, limit=limit, offset=offset)
+        from app.database import get_leads, count_leads
+        leads = get_leads(status=status, lead_type=lead_type, limit=limit, offset=offset)
         total = count_leads(status=status)
         return {"leads": leads, "total": total}
     except Exception:
@@ -734,3 +738,297 @@ def leads_count():
         }
     except Exception:
         return {"total": 0, "new": 0, "contacted": 0, "outreach_ready": 0}
+
+
+# ---------------------------------------------------------------------------
+# Campaigns
+# ---------------------------------------------------------------------------
+
+@router.get("/api/campaigns")
+def list_campaigns():
+    try:
+        from campaign import get_campaign_manager
+        cm = get_campaign_manager()
+        campaigns = cm.list_campaigns()
+        return [{"id": c.campaign_id, "name": c.name, "description": c.description,
+                 "status": c.status, "steps": len(c.steps),
+                 "created_at": c.created_at} for c in campaigns]
+    except Exception:
+        return []
+
+
+@router.post("/api/campaigns")
+def create_campaign(request: dict):
+    try:
+        from campaign import get_campaign_manager
+        cm = get_campaign_manager()
+        campaign_id = cm.create_campaign(
+            name=request.get("name", "Untitled Campaign"),
+            description=request.get("description", ""),
+            steps=request.get("steps", []),
+        )
+        return {"success": True, "campaign_id": campaign_id}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/api/campaigns/{campaign_id}")
+def get_campaign(campaign_id: int):
+    try:
+        from campaign import get_campaign_manager
+        cm = get_campaign_manager()
+        camp = cm.get_campaign(campaign_id)
+        if not camp:
+            raise HTTPException(status_code=404, detail="Campaign not found")
+        stats = cm.get_campaign_stats(campaign_id)
+        return {
+            "id": camp.campaign_id, "name": camp.name, "description": camp.description,
+            "status": camp.status, "created_at": camp.created_at,
+            "steps": [{"id": s.step_id, "order": s.step_order, "day_offset": s.day_offset,
+                       "subject": s.subject_template, "body": s.body_template,
+                       "channel": s.channel, "ai": s.is_ai_generated} for s in camp.steps],
+            "stats": stats,
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/api/campaigns/{campaign_id}/status")
+def update_campaign_status(campaign_id: int, request: dict):
+    try:
+        from campaign import get_campaign_manager
+        cm = get_campaign_manager()
+        cm.update_campaign_status(campaign_id, request.get("status", "active"))
+        return {"success": True}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.delete("/api/campaigns/{campaign_id}")
+def delete_campaign(campaign_id: int):
+    try:
+        from campaign import get_campaign_manager
+        cm = get_campaign_manager()
+        cm.delete_campaign(campaign_id)
+        return {"success": True}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/api/campaigns/{campaign_id}/enroll")
+def enroll_leads(campaign_id: int, request: dict):
+    try:
+        from campaign import get_campaign_manager
+        cm = get_campaign_manager()
+        result = cm.enroll_leads(campaign_id, request.get("lead_ids", []))
+        return {"success": True, **result}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/api/campaigns/{campaign_id}/enrollments")
+def get_enrollments(campaign_id: int):
+    try:
+        from campaign import get_campaign_manager
+        cm = get_campaign_manager()
+        return cm.get_enrollments(campaign_id)
+    except Exception as e:
+        return []
+
+
+# ---------------------------------------------------------------------------
+# Scheduler
+# ---------------------------------------------------------------------------
+
+@router.get("/api/schedules")
+def list_schedules():
+    try:
+        from scheduler import get_scheduler
+        sched = get_scheduler()
+        schedules = sched.list_schedules()
+        return [{"id": s.schedule_id, "name": s.name, "agent": s.agent_name,
+                 "interval_minutes": s.interval_minutes, "enabled": s.enabled,
+                 "config": s.config, "last_run_at": s.last_run_at,
+                 "next_run_at": s.next_run_at} for s in schedules]
+    except Exception:
+        return []
+
+
+@router.post("/api/schedules")
+def create_schedule(request: dict):
+    try:
+        from scheduler import get_scheduler
+        sched = get_scheduler()
+        schedule_id = sched.create_schedule(
+            name=request.get("name", "unnamed"),
+            agent_name=request.get("agent_name", ""),
+            interval_minutes=int(request.get("interval_minutes", 60)),
+            config=request.get("config", {}),
+            enabled=request.get("enabled", True),
+        )
+        return {"success": True, "schedule_id": schedule_id}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/api/schedules/{schedule_id}/run")
+def run_schedule_now(schedule_id: int):
+    try:
+        from scheduler import get_scheduler
+        sched = get_scheduler()
+        result = sched.run_schedule_now(schedule_id)
+        return result
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/api/schedules/{schedule_id}/toggle")
+def toggle_schedule(schedule_id: int, request: dict):
+    try:
+        from scheduler import get_scheduler
+        sched = get_scheduler()
+        sched.toggle_schedule(schedule_id, request.get("enabled", True))
+        return {"success": True}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.delete("/api/schedules/{schedule_id}")
+def delete_schedule(schedule_id: int):
+    try:
+        from scheduler import get_scheduler
+        sched = get_scheduler()
+        sched.delete_schedule(schedule_id)
+        return {"success": True}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/api/schedules/{schedule_id}/runs")
+def schedule_runs(schedule_id: int, limit: int = 50):
+    try:
+        from scheduler import get_scheduler
+        sched = get_scheduler()
+        return sched.get_run_history(schedule_id, limit)
+    except Exception:
+        return []
+
+
+@router.get("/api/scheduler/status")
+def scheduler_status():
+    try:
+        from scheduler import get_scheduler
+        sched = get_scheduler()
+        return {"running": sched.is_running, "schedules": len(sched.list_schedules())}
+    except Exception:
+        return {"running": False, "schedules": 0}
+
+
+# ---------------------------------------------------------------------------
+# Daemon
+# ---------------------------------------------------------------------------
+
+@router.get("/api/daemon/status")
+def daemon_status():
+    try:
+        from daemon import get_daemon
+        d = get_daemon()
+        return d.status()
+    except Exception:
+        return {"running": False}
+
+
+@router.post("/api/daemon/start")
+def daemon_start():
+    try:
+        from daemon import get_daemon
+        d = get_daemon()
+        d.start()
+        return {"success": True, "message": "Daemon started"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/api/daemon/stop")
+def daemon_stop():
+    try:
+        from daemon import get_daemon
+        d = get_daemon()
+        d.stop()
+        return {"success": True, "message": "Daemon stopped"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/api/daemon/restart")
+def daemon_restart(request: dict = None):
+    try:
+        from daemon import get_daemon
+        d = get_daemon()
+        interval = request.get("interval_seconds") if request else None
+        d.restart(interval_seconds=interval)
+        return {"success": True, "message": "Daemon restarted"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/api/daemon/log")
+def daemon_log(limit: int = 50):
+    try:
+        from daemon import get_daemon
+        d = get_daemon()
+        return d.get_log(limit)
+    except Exception:
+        return []
+
+
+# ---------------------------------------------------------------------------
+# Email Deliverability
+# ---------------------------------------------------------------------------
+
+@router.get("/api/email/health")
+def email_health():
+    try:
+        from email_sender import get_email_sender
+        sender = get_email_sender()
+        return sender.check_health()
+    except Exception as e:
+        return {"error": str(e)}
+
+
+@router.get("/api/email/rate-status")
+def email_rate_status():
+    try:
+        from send_limiter import get_send_limiter
+        limiter = get_send_limiter()
+        return limiter.get_all_status()
+    except Exception:
+        return {}
+
+
+@router.post("/api/email/verify")
+def verify_email(request: dict):
+    email = request.get("email", "")
+    if not email:
+        raise HTTPException(status_code=400, detail="email is required")
+    try:
+        from email_verifier import EmailVerifier
+        v = EmailVerifier(check_smtp=request.get("check_smtp", False))
+        return v.verify(email)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/api/email/check-spam")
+def check_spam(request: dict):
+    try:
+        from spam_checker import SpamChecker
+        checker = SpamChecker()
+        return checker.check(
+            subject=request.get("subject", ""),
+            body=request.get("body", ""),
+        )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))

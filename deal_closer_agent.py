@@ -131,26 +131,30 @@ class DealCloserAgent(BaseAgent):
             logger.error("Failed to save appointments.json: %s", e)
 
     def send_email(self, lead_name: str, message: str) -> bool:
-        """Send closing email via OutreachAgent's SMTP profile."""
+        """Send closing email via unified email sender."""
         try:
-            from outreach_agent import OutreachAgent
-            sender = OutreachAgent()
-            # Build a lead-like dict for the email
-            lead = {"business_name": lead_name, "business_email": ""}
-            # Find the lead's email from leads.json
-            leads = self.load_appointments()  # We don't have leads.json here, use appointment data
-            # Try to find email from the appointment
-            appointment = None
+            from email_sender import get_email_sender
+            sender = get_email_sender()
+
+            # Find email from appointments
+            email = ""
             for a in self.load_appointments():
-                if a.get("lead_name") == lead_name:
-                    appointment = a
+                if a.get("lead_name") == lead_name and a.get("lead_email"):
+                    email = a["lead_email"]
                     break
-            if appointment and appointment.get("lead_email"):
-                lead["business_email"] = appointment["lead_email"]
-            else:
+
+            if not email:
                 logger.warning("No email found for %s", lead_name)
                 return False
-            return sender.send_email(lead, message)
+
+            subject = f"Great talking with you, {lead_name}"
+            result = sender.send(
+                to=email,
+                subject=subject,
+                body=message,
+                lead_name=lead_name,
+            )
+            return result["success"]
         except Exception as e:
             logger.error("Email send failed for %s: %s", lead_name, e)
             return False

@@ -171,6 +171,109 @@ def init_db():
         except Exception:
             pass
 
+        # Lead type / import tracking
+        for col, typedef in [
+            ("lead_type", "TEXT DEFAULT 'cold'"),        # cold | warm | referral | inbound
+            ("import_batch_id", "TEXT"),
+            ("import_filename", "TEXT"),
+            ("email_verified", "INTEGER DEFAULT 0"),
+            ("email_verified_at", "REAL"),
+            ("verification_method", "TEXT"),              # syntax | mx | smtp
+        ]:
+            try:
+                conn.execute(f"ALTER TABLE leads ADD COLUMN {col} {typedef}")
+            except Exception:
+                pass
+
+        # Indexes for new columns
+        try:
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_leads_type ON leads(lead_type)")
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_leads_verified ON leads(email_verified)")
+        except Exception:
+            pass
+
+        # Campaign tables (created here too for safety; campaign.py also creates them)
+        conn.executescript("""
+            CREATE TABLE IF NOT EXISTS campaigns (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                name TEXT NOT NULL,
+                description TEXT DEFAULT '',
+                status TEXT DEFAULT 'active',
+                created_at REAL DEFAULT (strftime('%s','now')),
+                updated_at REAL DEFAULT (strftime('%s','now'))
+            );
+
+            CREATE TABLE IF NOT EXISTS campaign_steps (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                campaign_id INTEGER NOT NULL,
+                step_order INTEGER NOT NULL,
+                day_offset INTEGER NOT NULL DEFAULT 0,
+                subject_template TEXT DEFAULT '',
+                body_template TEXT DEFAULT '',
+                channel TEXT DEFAULT 'email',
+                is_ai_generated INTEGER DEFAULT 1,
+                FOREIGN KEY (campaign_id) REFERENCES campaigns(id)
+            );
+
+            CREATE TABLE IF NOT EXISTS campaign_enrollments (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                campaign_id INTEGER NOT NULL,
+                lead_id INTEGER NOT NULL,
+                current_step INTEGER DEFAULT 0,
+                status TEXT DEFAULT 'active',
+                enrolled_at REAL DEFAULT (strftime('%s','now')),
+                last_sent_at REAL,
+                completed_at REAL,
+                FOREIGN KEY (campaign_id) REFERENCES campaigns(id),
+                FOREIGN KEY (lead_id) REFERENCES leads(id)
+            );
+
+            CREATE TABLE IF NOT EXISTS schedules (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                name TEXT UNIQUE NOT NULL,
+                agent_name TEXT NOT NULL,
+                interval_minutes INTEGER NOT NULL DEFAULT 60,
+                config TEXT DEFAULT '{}',
+                enabled INTEGER DEFAULT 1,
+                last_run_at REAL DEFAULT 0,
+                next_run_at REAL DEFAULT 0,
+                created_at REAL DEFAULT (strftime('%s','now'))
+            );
+
+            CREATE TABLE IF NOT EXISTS schedule_runs (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                schedule_id INTEGER NOT NULL,
+                agent_name TEXT NOT NULL,
+                started_at REAL DEFAULT (strftime('%s','now')),
+                completed_at REAL,
+                success INTEGER DEFAULT 0,
+                result_message TEXT,
+                result_stats TEXT,
+                duration_seconds REAL DEFAULT 0,
+                FOREIGN KEY (schedule_id) REFERENCES schedules(id)
+            );
+
+            CREATE TABLE IF NOT EXISTS daemon_log (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                cycle_number INTEGER,
+                started_at REAL DEFAULT (strftime('%s','now')),
+                completed_at REAL,
+                replies_found INTEGER DEFAULT 0,
+                leads_marked INTEGER DEFAULT 0,
+                campaign_emails_sent INTEGER DEFAULT 0,
+                followup_emails_sent INTEGER DEFAULT 0,
+                errors INTEGER DEFAULT 0,
+                error_message TEXT,
+                duration_seconds REAL DEFAULT 0
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_ce_campaign ON campaign_enrollments(campaign_id);
+            CREATE INDEX IF NOT EXISTS idx_ce_lead ON campaign_enrollments(lead_id);
+            CREATE INDEX IF NOT EXISTS idx_ce_status ON campaign_enrollments(status);
+            CREATE INDEX IF NOT EXISTS idx_sr_schedule ON schedule_runs(schedule_id);
+            CREATE INDEX IF NOT EXISTS idx_dl_cycle ON daemon_log(cycle_number);
+        """)
+
         # Seed default users if not present
         existing = conn.execute("SELECT COUNT(*) as c FROM users").fetchone()["c"]
         if existing == 0:
@@ -412,7 +515,8 @@ _LEAD_FIELDS = [
     "address", "niche", "category", "services_offered", "linkedin_url",
     "instagram_handle", "facebook_url", "source", "status", "outreach_ready",
     "needs_human", "needs_human_reason", "channel_used", "preferred_channel",
-    "score", "notes",
+    "score", "notes", "lead_type", "import_batch_id", "import_filename",
+    "email_verified", "email_verified_at", "verification_method",
 ]
 
 
@@ -483,7 +587,8 @@ def get_lead(lead_id: int) -> dict:
 
 
 def get_leads(status: str = None, outreach_ready: bool = None,
-              has_email: bool = None, limit: int = 500, offset: int = 0) -> list[dict]:
+              has_email: bool = None, lead_type: str = None,
+              limit: int = 500, offset: int = 0) -> list[dict]:
     with db_conn() as conn:
         query = "SELECT * FROM leads WHERE 1=1"
         params = []
@@ -498,6 +603,9 @@ def get_leads(status: str = None, outreach_ready: bool = None,
                 query += " AND business_email IS NOT NULL AND business_email != ''"
             else:
                 query += " AND (business_email IS NULL OR business_email = '')"
+        if lead_type:
+            query += " AND lead_type = ?"
+            params.append(lead_type)
         query += " ORDER BY score DESC, id ASC LIMIT ? OFFSET ?"
         params.extend([limit, offset])
         rows = conn.execute(query, params).fetchall()
@@ -522,7 +630,8 @@ def update_lead(lead_id: int, updates: dict):
         sets = []
         vals = []
         for k, v in updates.items():
-            if k in _LEAD_FIELDS or k in ("first_contacted_at", "last_contacted_at", "contact_count"):
+            if k in _LEAD_FIELDS or k in ("first_contacted_at", "last_contacted_at", "contact_count",
+                                           "email_verified", "email_verified_at", "verification_method"):
                 sets.append(f"{k} = ?")
                 vals.append(v)
         if sets:

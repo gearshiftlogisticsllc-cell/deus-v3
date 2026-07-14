@@ -38,6 +38,7 @@ class StyleConfig:
     custom_template: str = ""                   # if set, used INSTEAD of LLM generation
     use_custom_template: bool = False
     call_to_action: str = "Would you be open to a short call this week?"
+    ai_email_enabled: bool = True               # Use LLM to generate emails (vs template only)
 
 
 def load_style_config() -> StyleConfig:
