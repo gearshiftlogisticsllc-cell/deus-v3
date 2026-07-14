@@ -21,6 +21,12 @@ from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 from dotenv import load_dotenv
 
+try:
+    import resend
+    RESEND_AVAILABLE = True
+except ImportError:
+    RESEND_AVAILABLE = False
+
 from base_agent import BaseAgent, AgentResult, AgentHealth, make_result, make_health
 from reply_detector import EmailTracker
 
@@ -49,6 +55,7 @@ class OutreachAgent(BaseAgent):
 
     def __init__(self, smtp_profile_name: str = None):
         self.client = None
+        self.resend_client = None
         self.style = load_style_config()
 
         groq_key = os.getenv("GROQ_API_KEY", "")
@@ -58,6 +65,12 @@ class OutreachAgent(BaseAgent):
                 self.client = Groq(api_key=groq_key)
             except Exception as e:
                 logger.warning("Groq init failed: %s", e)
+
+        resend_key = os.getenv("RESEND_API_KEY", "")
+        if resend_key and RESEND_AVAILABLE:
+            resend.api_key = resend_key
+            self.resend_client = True
+            logger.info("Resend API initialized — will use HTTP email sending")
 
         profile = None
         if smtp_profile_name:
@@ -138,15 +151,34 @@ class OutreachAgent(BaseAgent):
         to_email = lead.get("business_email", "")
         if not to_email:
             return False
+        subject = self.render_subject(lead)
+        from_email = self.smtp_profile.smtp_email if self.smtp_profile else os.getenv("SMTP_EMAIL", "")
+
+        # --- Try Resend API first (HTTP, works on Railway) ---
+        if self.resend_client and RESEND_AVAILABLE:
+            try:
+                params = {
+                    "from": f"DEUS <{from_email}>",
+                    "to": [to_email],
+                    "subject": subject,
+                    "text": message,
+                }
+                result = resend.Emails.send(params)
+                logger.info("Resend: email sent to %s (%s)", lead.get("business_name"), to_email)
+                return True
+            except Exception as e:
+                logger.warning("Resend failed for %s: %s — falling back to SMTP", to_email, e)
+
+        # --- Fallback: SMTP (works locally, blocked on Railway) ---
         if self.smtp_profile is None:
-            logger.error("No SMTP profile configured — cannot send email.")
+            logger.error("No SMTP profile and no Resend API — cannot send email to %s", to_email)
             return False
 
         try:
             msg = MIMEMultipart()
             msg["From"] = self.smtp_profile.smtp_email
             msg["To"] = to_email
-            msg["Subject"] = self.render_subject(lead)
+            msg["Subject"] = subject
             msg.attach(MIMEText(message, "plain"))
 
             context = ssl.create_default_context()
@@ -174,11 +206,11 @@ class OutreachAgent(BaseAgent):
                             server.ehlo()
                             server.login(email_addr, password)
                             server.sendmail(email_addr, to_email, msg.as_string())
-                    logger.info("Email sent to %s (%s) via port %d",
+                    logger.info("SMTP: email sent to %s (%s) via port %d",
                                 lead.get("business_name"), to_email, port)
                     return True
                 except Exception as port_err:
-                    logger.warning("Port %d failed for %s: %s", port, to_email, port_err)
+                    logger.warning("SMTP port %d failed for %s: %s", port, to_email, port_err)
                     continue
 
             logger.error("All SMTP ports failed for %s", to_email)

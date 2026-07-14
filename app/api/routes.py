@@ -60,7 +60,7 @@ def health_check():
     groq = bool(os.getenv("GROQ_API_KEY", ""))
     gemini = bool(os.getenv("GEMINI_API_KEY", ""))
     calendly = bool(os.getenv("CALENDLY_API_KEY", ""))
-    smtp = bool(os.getenv("SMTP_EMAIL", ""))
+    smtp = bool(os.getenv("RESEND_API_KEY", "") or os.getenv("SMTP_EMAIL", ""))
 
     agents = get_available_agents()
     healthy = 0
