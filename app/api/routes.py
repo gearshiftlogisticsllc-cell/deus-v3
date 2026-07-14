@@ -9,7 +9,7 @@ import time
 import csv
 import io
 import logging
-from typing import Optional
+from typing import Optional, Dict
 
 logger = logging.getLogger(__name__)
 
@@ -1124,12 +1124,15 @@ def due_calendar_entries(campaign_id: int = None):
 # Google OAuth2 (Gmail API)
 # ---------------------------------------------------------------------------
 
+_oauth_verifiers: Dict[str, str] = {}  # state -> PKCE code_verifier
+
 @router.get("/api/gmail/auth-url")
 def gmail_auth_url():
     """Get the Google OAuth URL for Gmail API authorization."""
     try:
         from google_auth_oauthlib.flow import Flow
         import json
+        import secrets
         client_config = {
             "web": {
                 "client_id": os.getenv("GOOGLE_CLIENT_ID", ""),
@@ -1146,12 +1149,14 @@ def gmail_auth_url():
             scopes=["https://www.googleapis.com/auth/gmail.send"],
         )
         flow.redirect_uri = os.getenv("GOOGLE_REDIRECT_URI", "http://localhost:8000/api/gmail/callback")
-        auth_url, _ = flow.authorization_url(
+        auth_url, state = flow.authorization_url(
             access_type="offline",
             include_granted_scopes="true",
             prompt="consent",
         )
-        return {"available": True, "auth_url": auth_url}
+        # Persist code_verifier so callback can reuse it (PKCE requirement)
+        _oauth_verifiers[state] = flow.code_verifier
+        return {"available": True, "auth_url": auth_url, "state": state}
     except ImportError:
         return {"available": False, "error": "google-auth-oauthlib not installed"}
     except Exception as e:
@@ -1159,7 +1164,7 @@ def gmail_auth_url():
 
 
 @router.get("/api/gmail/callback")
-def gmail_callback(code: str = None, error: str = None):
+def gmail_callback(code: str = None, error: str = None, state: str = None):
     """Handle Google OAuth2 callback — saves token.json."""
     if error:
         return {"success": False, "error": error}
@@ -1182,6 +1187,10 @@ def gmail_callback(code: str = None, error: str = None):
             scopes=["https://www.googleapis.com/auth/gmail.send"],
         )
         flow.redirect_uri = os.getenv("GOOGLE_REDIRECT_URI", "http://localhost:8000/api/gmail/callback")
+        # Restore the PKCE code_verifier from the auth step
+        code_verifier = _oauth_verifiers.pop(state, None) if state else None
+        if code_verifier:
+            flow.code_verifier = code_verifier
         flow.fetch_token(code=code)
         creds = flow.credentials
         # Save token
@@ -1191,7 +1200,7 @@ def gmail_callback(code: str = None, error: str = None):
         return {
             "success": True,
             "message": "Gmail API authorized! Token saved. You can now send emails via Gmail API.",
-            "email": creds._id_token.get("email", "") if hasattr(creds, "_id_token") else "",
+            "email": creds._id_token.get("email", "") if hasattr(creds, "_id_token") and creds._id_token else creds.client_id,
         }
     except Exception as e:
         return {"success": False, "error": str(e)}

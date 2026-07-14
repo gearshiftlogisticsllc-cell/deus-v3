@@ -110,5 +110,14 @@
     "sent": true,
     "message": "I am reaching out to introduce a potential business opportunity that may be of interest to there. Our proposal aligns with your niche and we believe it could bring value to your operations. I would like to briefly discuss the details with you. Would you be open to a short call this week? This would provide an opportunity to explore how our services can support your business goals. I look forward to the possibility of speaking with you soon.\nBest regards",
     "smtp_profile": "Sales Gmail"
+  },
+  {
+    "lead_id": 745,
+    "business_name": "Climate Control",
+    "business_email": "rfrey@climatecontrolbakersfield.com",
+    "channel": "email",
+    "sent": true,
+    "message": "Dear Climate Control Team,\n\nI am reaching out to introduce a business proposal that may be of interest to your company. Our solution has the potential to enhance your services and drive growth. I woul",
+    "smtp_profile": "Sales Gmail"
   }
 ]
