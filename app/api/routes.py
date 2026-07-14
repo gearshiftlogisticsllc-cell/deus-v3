@@ -8,7 +8,10 @@ import json
 import time
 import csv
 import io
+import logging
 from typing import Optional
+
+logger = logging.getLogger(__name__)
 
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import StreamingResponse
@@ -659,18 +662,31 @@ def outreach_preview(request: dict):
 
 @router.post("/api/outreach/send")
 def outreach_send(request: dict):
-    """Send emails to confirmed lead IDs only."""
+    """Send emails to confirmed lead IDs only. Runs in background to avoid timeout."""
     lead_ids = request.get("lead_ids", [])
     channel = request.get("channel", "email")
     if not lead_ids:
         raise HTTPException(status_code=400, detail="lead_ids is required")
-    try:
-        from outreach_agent import OutreachAgent
-        agent = OutreachAgent()
-        result = agent.run(mode="send", lead_ids=lead_ids, channel=channel)
-        return {"success": result.success, "message": result.message, "stats": result.stats}
-    except Exception as e:
-        return {"success": False, "error": str(e)}
+
+    import threading
+
+    def _do_send():
+        try:
+            from outreach_agent import OutreachAgent
+            agent = OutreachAgent()
+            result = agent.run(mode="send", lead_ids=lead_ids, channel=channel)
+            logger.info("Background send complete: %s", result.message)
+        except Exception as e:
+            logger.error("Background send failed: %s", e)
+
+    t = threading.Thread(target=_do_send, daemon=True)
+    t.start()
+
+    return {
+        "success": True,
+        "message": f"Sending to {len(lead_ids)} leads in background. Check activity log for results.",
+        "stats": {"queued": len(lead_ids)},
+    }
 
 
 @router.get("/api/leads/list")

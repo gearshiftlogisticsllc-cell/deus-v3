@@ -85,6 +85,7 @@ class OutreachAgent(BaseAgent):
             response = self.client.chat.completions.create(
                 model="llama-3.3-70b-versatile",
                 messages=[{"role": "user", "content": prompt}],
+                timeout=15,
             )
             return response.choices[0].message.content.strip()
         except Exception as e:
@@ -150,13 +151,18 @@ class OutreachAgent(BaseAgent):
 
             context = ssl.create_default_context()
             port = self.smtp_profile.smtp_port
+            host = self.smtp_profile.smtp_host
+            timeout = 10
+
             if port == 465:
-                with smtplib.SMTP_SSL(self.smtp_profile.smtp_host, port, context=context) as server:
+                with smtplib.SMTP_SSL(host, port, context=context, timeout=timeout) as server:
                     server.login(self.smtp_profile.smtp_email, self.smtp_profile.smtp_password)
                     server.sendmail(self.smtp_profile.smtp_email, to_email, msg.as_string())
             else:
-                with smtplib.SMTP(self.smtp_profile.smtp_host, port) as server:
+                with smtplib.SMTP(host, port, timeout=timeout) as server:
+                    server.ehlo()
                     server.starttls(context=context)
+                    server.ehlo()
                     server.login(self.smtp_profile.smtp_email, self.smtp_profile.smtp_password)
                     server.sendmail(self.smtp_profile.smtp_email, to_email, msg.as_string())
 
@@ -283,21 +289,15 @@ class OutreachAgent(BaseAgent):
         sent_count = 0
         failed_count = 0
         log_entries = []
-        senders = self._senders()
 
         for lead in leads:
             resolved = self.resolve_channel(lead, channel)
-            if resolved is None:
+            if resolved != "email":
                 failed_count += 1
                 continue
 
             message = self.generate_outreach_message(lead)
-            sender = senders.get(resolved)
-            if not sender:
-                failed_count += 1
-                continue
-
-            sent = sender(lead, message)
+            sent = self.send_email(lead, message)
             if sent:
                 sent_count += 1
                 log_entries.append({
