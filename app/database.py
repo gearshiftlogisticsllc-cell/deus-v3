@@ -325,6 +325,16 @@ def init_db():
             );
         """)
 
+        # Gmail API token (persists across Railway restarts)
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS gmail_tokens (
+                id INTEGER PRIMARY KEY CHECK (id = 1),
+                token_json TEXT NOT NULL,
+                sender_email TEXT DEFAULT '',
+                updated_at REAL DEFAULT (strftime('%s','now'))
+            )
+        """)
+
         # Migration: add geo_target columns that may not exist on older DBs
         for col, typedef in [
             ("scheduled_day", "TEXT DEFAULT ''"),
@@ -797,3 +807,36 @@ def _migrate_leads_json(conn):
         except Exception:
             pass
     print(f"[DB MIGRATION] Imported {imported} leads from leads.json into database.")
+
+
+# ---------------------------------------------------------------------------
+# Gmail Token persistence (DB-backed, survives Railway restarts)
+# ---------------------------------------------------------------------------
+
+def save_gmail_token(token_json: str, sender_email: str = ""):
+    """Upsert the Gmail API OAuth token into the database."""
+    with db_conn() as conn:
+        existing = conn.execute("SELECT id FROM gmail_tokens WHERE id = 1").fetchone()
+        if existing:
+            conn.execute(
+                "UPDATE gmail_tokens SET token_json = ?, sender_email = ?, updated_at = ? WHERE id = 1",
+                (token_json, sender_email, time.time()),
+            )
+        else:
+            conn.execute(
+                "INSERT INTO gmail_tokens (id, token_json, sender_email, updated_at) VALUES (1, ?, ?, ?)",
+                (token_json, sender_email, time.time()),
+            )
+
+
+def get_gmail_token() -> str | None:
+    """Return the stored Gmail token JSON, or None if not configured."""
+    with db_conn() as conn:
+        row = conn.execute("SELECT token_json FROM gmail_tokens WHERE id = 1").fetchone()
+        return row["token_json"] if row else None
+
+
+def delete_gmail_token():
+    """Remove the stored Gmail token."""
+    with db_conn() as conn:
+        conn.execute("DELETE FROM gmail_tokens WHERE id = 1")

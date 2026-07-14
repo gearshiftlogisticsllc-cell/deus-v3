@@ -49,43 +49,39 @@ class GmailSender:
         try:
             from google.auth.transport.requests import Request
             from google.oauth2.credentials import Credentials
-            from google_auth_oauthlib.flow import InstalledAppFlow
             from googleapiclient.discovery import build
 
             SCOPES = ["https://www.googleapis.com/auth/gmail.send"]
 
             creds = None
 
-            # Load existing token
-            if os.path.exists(TOKEN_FILE):
+            # 1) Try database first (persists across Railway restarts)
+            try:
+                from app.database import get_gmail_token
+                token_json = get_gmail_token()
+                if token_json:
+                    creds = Credentials.from_authorized_user_info(json.loads(token_json), SCOPES)
+                    logger.info("Gmail token loaded from database")
+            except Exception as e:
+                logger.debug("DB token load failed (expected if DB not ready): %s", e)
+
+            # 2) Fall back to token.json (local dev)
+            if not creds and os.path.exists(TOKEN_FILE):
                 creds = Credentials.from_authorized_user_file(TOKEN_FILE, SCOPES)
+                logger.info("Gmail token loaded from %s", TOKEN_FILE)
 
-            # If no valid token, do OAuth flow
-            if not creds or not creds.valid:
-                if creds and creds.expired and creds.refresh_token:
-                    try:
-                        creds.refresh(Request())
-                    except Exception as e:
-                        logger.warning("Token refresh failed: %s", e)
-                        creds = None
+            # 3) If expired and has refresh token, refresh
+            if creds and creds.expired and creds.refresh_token:
+                try:
+                    creds.refresh(Request())
+                    logger.info("Gmail token refreshed")
+                except Exception as e:
+                    logger.warning("Token refresh failed: %s", e)
+                    creds = None
 
-                if not creds:
-                    if not os.path.exists(CREDENTIALS_FILE):
-                        logger.info("No credentials.json found — Gmail API disabled")
-                        return
-
-                    flow = InstalledAppFlow.from_client_secrets_file(
-                        CREDENTIALS_FILE, SCOPES
-                    )
-                    # Try local server first, fall back to console
-                    try:
-                        creds = flow.run_local_server(port=0)
-                    except Exception:
-                        creds = flow.run_console()
-
-                # Save token for next run
-                with open(TOKEN_FILE, "w") as f:
-                    f.write(creds.to_json())
+            if not creds:
+                logger.info("No Gmail token available — Gmail API disabled")
+                return
 
             self._service = build("gmail", "v1", credentials=creds)
             self._available = True

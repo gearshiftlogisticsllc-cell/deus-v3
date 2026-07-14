@@ -1193,10 +1193,9 @@ def gmail_callback(code: str = None, error: str = None, state: str = None):
             flow.code_verifier = code_verifier
         flow.fetch_token(code=code)
         creds = flow.credentials
-        # Save token
-        token_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "token.json")
-        with open(token_path, "w") as f:
-            f.write(creds.to_json())
+        # Save token to database (persists across Railway restarts)
+        from app.database import save_gmail_token
+        save_gmail_token(creds.to_json(), os.getenv("GMAIL_SENDER_EMAIL", ""))
         return {
             "success": True,
             "message": "Gmail API authorized! Token saved. You can now send emails via Gmail API.",
@@ -1208,9 +1207,10 @@ def gmail_callback(code: str = None, error: str = None, state: str = None):
 
 @router.get("/api/gmail/status")
 def gmail_status():
-    """Check if Gmail API is configured and authorized."""
-    token_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "token.json")
-    has_token = os.path.exists(token_path)
+    """Check if Gmail API is configured and authorized (DB-backed)."""
+    from app.database import get_gmail_token
+    token_json = get_gmail_token()
+    has_token = bool(token_json)
     has_client_id = bool(os.getenv("GOOGLE_CLIENT_ID", ""))
     sender_email = os.getenv("GMAIL_SENDER_EMAIL", "")
     return {
