@@ -638,16 +638,36 @@ function sendConfirmed() {
   }).then(r=>r.json()).then(d=>{
     setBtn('out-send-btn', false);
     const msg = d.message || d.detail || JSON.stringify(d);
-    log('out-log', msg, d.success===false||d.detail?'err':'ok');
-    if (d.stats) {
-      if (d.stats.queued !== undefined) log('out-log', 'Queued: '+d.stats.queued+' emails (sending in background)', 'info');
-      else log('out-log', 'Stats: sent='+d.stats.sent+', failed='+d.stats.failed, 'ok');
+    log('out-log', msg, 'info');
+    if (d.job_id) {
+      log('out-log', 'Job ID: '+d.job_id+' — polling status...', 'info');
+      pollSendStatus(d.job_id);
     }
     outSelectedIds = new Set();
     document.getElementById('out-preview-section').style.display = 'none';
     document.getElementById('out-send-btn').style.display = 'none';
-    refreshStats();
   }).catch(e=>{ setBtn('out-send-btn', false); log('out-log', 'ERROR: '+e, 'err'); });
+}
+
+function pollSendStatus(jobId) {
+  let attempts = 0;
+  const maxAttempts = 30;
+  const interval = setInterval(function() {
+    attempts++;
+    fetch(API+'/api/outreach/status/'+jobId).then(r=>r.json()).then(d=>{
+      if (d.status === 'done' || d.status === 'error' || attempts >= maxAttempts) {
+        clearInterval(interval);
+        if (d.status === 'done') log('out-log', 'Send complete: '+d.message, 'ok');
+        else if (d.status === 'error') log('out-log', 'Send failed: '+d.message, 'err');
+        else log('out-log', 'Status check timeout. Sent: '+d.sent+', Failed: '+d.failed, 'warn');
+        refreshStats();
+      } else {
+        log('out-log', 'Still sending... (sent: '+d.sent+', failed: '+d.failed+')', 'info');
+      }
+    }).catch(function() {
+      if (attempts >= maxAttempts) { clearInterval(interval); log('out-log', 'Status check timeout', 'warn'); }
+    });
+  }, 3000);
 }
 
 function runOutreach() { previewOutreach(); }

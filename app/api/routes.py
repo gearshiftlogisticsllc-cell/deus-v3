@@ -660,6 +660,8 @@ def outreach_preview(request: dict):
     return {"success": True, "candidates": candidates, "count": len(candidates)}
 
 
+_send_jobs = {}
+
 @router.post("/api/outreach/send")
 def outreach_send(request: dict):
     """Send emails to confirmed lead IDs only. Runs in background to avoid timeout."""
@@ -669,24 +671,43 @@ def outreach_send(request: dict):
         raise HTTPException(status_code=400, detail="lead_ids is required")
 
     import threading
+    job_id = str(int(time.time() * 1000))
+    _send_jobs[job_id] = {"status": "running", "sent": 0, "failed": 0, "message": ""}
 
     def _do_send():
         try:
             from outreach_agent import OutreachAgent
             agent = OutreachAgent()
             result = agent.run(mode="send", lead_ids=lead_ids, channel=channel)
-            logger.info("Background send complete: %s", result.message)
+            _send_jobs[job_id] = {
+                "status": "done",
+                "sent": result.stats.get("sent", 0),
+                "failed": result.stats.get("failed", 0),
+                "message": result.message,
+            }
+            logger.info("Background send [%s] complete: %s", job_id, result.message)
         except Exception as e:
-            logger.error("Background send failed: %s", e)
+            _send_jobs[job_id] = {"status": "error", "sent": 0, "failed": len(lead_ids), "message": str(e)}
+            logger.error("Background send [%s] failed: %s", job_id, e)
 
     t = threading.Thread(target=_do_send, daemon=True)
     t.start()
 
     return {
         "success": True,
-        "message": f"Sending to {len(lead_ids)} leads in background. Check activity log for results.",
+        "message": f"Sending to {len(lead_ids)} leads in background. Check status with job_id.",
         "stats": {"queued": len(lead_ids)},
+        "job_id": job_id,
     }
+
+
+@router.get("/api/outreach/status/{job_id}")
+def outreach_status(job_id: str):
+    """Check background send job status."""
+    job = _send_jobs.get(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+    return job
 
 
 @router.get("/api/leads/list")
