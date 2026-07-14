@@ -146,16 +146,7 @@ tr:hover td{background:var(--panel2)}
           <div class="field"><label>Niche (e.g. HVAC companies)</label><input type="text" id="geo-niche" placeholder="e.g. dental clinics, roofing companies"></div>
           <div class="field" style="flex:.3"><label>Leads per State</label><input type="number" id="geo-target" value="100"></div>
         </div>
-        <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px" id="state-grid">
-          <script>
-            const US_STATES = ['AL','AK','AZ','AR','CA','CO','CT','DE','FL','GA','HI','ID','IL','IN','IA','KS','KY','LA','ME','MD','MA','MI','MN','MS','MO','MT','NE','NV','NH','NJ','NM','NY','NC','ND','OH','OK','OR','PA','RI','SC','SD','TN','TX','UT','VT','VA','WA','WV','WI','WY'];
-            const STATE_NAMES = {AL:'Alabama',AK:'Alaska',AZ:'Arizona',AR:'Arkansas',CA:'California',CO:'Colorado',CT:'Connecticut',DE:'Delaware',FL:'Florida',GA:'Georgia',HI:'Hawaii',ID:'Idaho',IL:'Illinois',IN:'Indiana',IA:'Iowa',KS:'Kansas',KY:'Kentucky',LA:'Louisiana',ME:'Maine',MD:'Maryland',MA:'Massachusetts',MI:'Michigan',MN:'Minnesota',MS:'Mississippi',MO:'Missouri',MT:'Montana',NE:'Nebraska',NV:'Nevada',NH:'New Hampshire',NJ:'New Jersey',NM:'New Mexico',NY:'New York',NC:'North Carolina',ND:'North Dakota',OH:'Ohio',OK:'Oklahoma',OR:'Oregon',PA:'Pennsylvania',RI:'Rhode Island',SC:'South Carolina',SD:'South Dakota',TN:'Tennessee',TX:'Texas',UT:'Utah',VT:'Vermont',VA:'Virginia',WA:'Washington',WV:'West Virginia',WI:'Wisconsin',WY:'Wyoming'};
-            const DAYS = ['Monday','Tuesday','Wednesday','Thursday','Friday','Saturday','Sunday'];
-            document.getElementById('state-grid').innerHTML = US_STATES.map(code =>
-              '<div class="state-btn" onclick="toggleState(\''+code+'\')" id="st-'+code+'" style="padding:6px 10px;background:var(--panel2);border:1px solid var(--border);border-radius:4px;cursor:pointer;font-size:11px;color:var(--muted);transition:all .15s" title="Click to schedule '+STATE_NAMES[code]+'">'+code+'</div>'
-            ).join('');
-          </script>
-        </div>
+        <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px" id="state-grid"></div>
         <div class="row" style="gap:6px">
           <div class="field" style="flex:.3"><label>Run Day</label><select id="geo-day"><option value="">Select Day</option><option>Monday</option><option>Tuesday</option><option>Wednesday</option><option>Thursday</option><option>Friday</option><option>Saturday</option><option>Sunday</option></select></div>
           <div class="field" style="flex:.2"><label>Time (24h)</label><input type="time" id="geo-time" value="05:00"></div>
@@ -1414,87 +1405,7 @@ function reviewChange(id, approved) {
   });
 }
 
-// ========== CAMPAIGNS ==========
-function createCampaign() {
-  const name = document.getElementById('cmp-name').value.trim();
-  const target = document.getElementById('cmp-target').value.trim();
-  const agent = document.getElementById('cmp-agent').value;
-  const interval = parseInt(document.getElementById('cmp-interval').value)||3600;
-  if (!name) { document.getElementById('cmp-status').innerHTML='<span class="pill pill-err">Enter name</span>'; return; }
-  fetch(API+'/api/campaigns', {
-    method:'POST', headers:{'Content-Type':'application/json'},
-    body: JSON.stringify({name:name, target:target, agent:agent, interval_seconds:interval, steps:[{agent:agent,config:{}}]})
-  }).then(r=>r.json()).then(d=>{
-    if (d.campaign_id) { document.getElementById('cmp-status').innerHTML='<span class="pill pill-ok">Created</span>'; loadCampaigns(); }
-    else { document.getElementById('cmp-status').innerHTML='<span class="pill pill-err">'+(d.error||'Failed')+'</span>'; }
-  });
-}
 
-function loadCampaigns() {
-  fetch(API+'/api/campaigns').then(r=>r.json()).then(d=>{
-    let html = '';
-    (d||[]).forEach(c=>{
-      html += '<tr><td>'+c.name+'</td><td style="color:var(--muted)">'+(c.target||'')+'</td><td>'+c.agent+'</td><td style="color:var(--muted)">'+c.interval_seconds+'s</td><td><span class="pill '+(c.active?'pill-ok':'pill-off')+'">'+(c.active?'Active':'Paused')+'</span></td><td>';
-      html += '<button onclick="toggleCampaign('+c.id+','+(!c.active)+')" style="padding:2px 8px;font-size:11px;background:var(--bg);border:1px solid var(--border);color:var(--cyan);cursor:pointer;border-radius:3px;margin-right:4px">'+(c.active?'Pause':'Resume')+'</button>';
-      html += '<button onclick="runCampaignNow('+c.id+')" class="btn-green" style="padding:2px 8px;font-size:11px">Run Now</button>';
-      html += '</td></tr>';
-    });
-    document.getElementById('cmp-tbody').innerHTML = html || '<tr><td colspan="6" style="color:var(--muted)">No campaigns yet</td></tr>';
-  });
-}
-
-function toggleCampaign(id, active) {
-  fetch(API+'/api/campaigns/'+id+'/toggle', {method:'POST'}).then(r=>r.json()).then(d=>{
-    log('cmp-log', 'Campaign #'+id+(active?' activated':' paused'), 'ok');
-    loadCampaigns();
-  });
-}
-
-function runCampaignNow(id) {
-  fetch(API+'/api/campaigns/'+id+'/run-now', {method:'POST'}).then(r=>r.json()).then(d=>{
-    log('cmp-log', d.message||d.error||'Campaign triggered', d.message?'ok':'err');
-  });
-}
-
-// ========== SCHEDULER ==========
-function createSchedule() {
-  const name = document.getElementById('sch-name').value.trim();
-  const agent = document.getElementById('sch-agent').value;
-  const interval = parseInt(document.getElementById('sch-interval').value)||3600;
-  if (!name) { log('sch-log','Enter a name','err'); return; }
-  fetch(API+'/api/schedules', {
-    method:'POST', headers:{'Content-Type':'application/json'},
-    body: JSON.stringify({name:name, agent:agent, interval_seconds:interval})
-  }).then(r=>r.json()).then(d=>{
-    if (d.schedule_id) { log('sch-log','Schedule created: '+name,'ok'); loadSchedules(); }
-    else { log('sch-log', d.error||'Failed','err'); }
-  });
-}
-
-function loadSchedules() {
-  fetch(API+'/api/schedules').then(r=>r.json()).then(d=>{
-    let html = '';
-    (d||[]).forEach(s=>{
-      html += '<tr><td>'+s.name+'</td><td>'+s.agent+'</td><td style="color:var(--muted)">'+s.interval_seconds+'s</td><td><span class="pill '+(s.active?'pill-ok':'pill-off')+'">'+(s.active?'Active':'Paused')+'</span></td><td style="color:var(--muted)">'+fmtDate(s.last_run_at)+'</td><td>';
-      html += '<button onclick="toggleSchedule('+s.id+')" style="padding:2px 8px;font-size:11px;background:var(--bg);border:1px solid var(--border);color:var(--cyan);cursor:pointer;border-radius:3px;margin-right:4px">'+(s.active?'Pause':'Resume')+'</button>';
-      html += '<button onclick="runScheduleNow('+s.id+')" class="btn-green" style="padding:2px 8px;font-size:11px">Run Now</button>';
-      html += '</td></tr>';
-    });
-    document.getElementById('sch-tbody').innerHTML = html || '<tr><td colspan="6" style="color:var(--muted)">No schedules yet</td></tr>';
-  });
-}
-
-function toggleSchedule(id) {
-  fetch(API+'/api/schedules/'+id+'/toggle', {method:'POST'}).then(r=>r.json()).then(d=>{
-    log('sch-log','Schedule #'+id+' toggled','ok'); loadSchedules();
-  });
-}
-
-function runScheduleNow(id) {
-  fetch(API+'/api/schedules/'+id+'/run-now', {method:'POST'}).then(r=>r.json()).then(d=>{
-    log('sch-log', d.message||d.error||'Run triggered', d.message?'ok':'err');
-  });
-}
 
 // ========== DAEMON ==========
 function loadDaemon() {
@@ -1607,8 +1518,9 @@ function scheduleSelectedStates() {
   if (selectedStates.size === 0) { alert('Click states on the map to select them first'); return; }
 
   let completed = 0;
+  const STATE_NAMES = {AL:'Alabama',AK:'Alaska',AZ:'Arizona',AR:'Arkansas',CA:'California',CO:'Colorado',CT:'Connecticut',DE:'Delaware',FL:'Florida',GA:'Georgia',HI:'Hawaii',ID:'Idaho',IL:'Illinois',IN:'Indiana',IA:'Iowa',KS:'Kansas',KY:'Kentucky',LA:'Louisiana',ME:'Maine',MD:'Maryland',MA:'Massachusetts',MI:'Michigan',MN:'Minnesota',MS:'Mississippi',MO:'Missouri',MT:'Montana',NE:'Nebraska',NV:'Nevada',NH:'New Hampshire',NJ:'New Jersey',NM:'New Mexico',NY:'New York',NC:'North Carolina',ND:'North Dakota',OH:'Ohio',OK:'Oklahoma',OR:'Oregon',PA:'Pennsylvania',RI:'Rhode Island',SC:'South Carolina',SD:'South Dakota',TN:'Tennessee',TX:'Texas',UT:'Utah',VT:'Vermont',VA:'Virginia',WA:'Washington',WV:'West Virginia',WI:'Wisconsin',WY:'Wyoming'};
   selectedStates.forEach(code => {
-    const name = (window.STATE_NAMES||{})[code] || code;
+    const name = STATE_NAMES[code] || code;
     fetch(API+'/api/geo/targets', {
       method:'POST', headers:{'Content-Type':'application/json'},
       body: JSON.stringify({country:'United States', state:name, target_type:'scout', scheduled_day: day, scheduled_time: time})
@@ -1777,18 +1689,6 @@ function addCalendarEntry() {
     status.innerHTML = '';
   }).catch(e=>{ status.innerHTML = ''; log('fu-log', 'Error: '+e, 'err'); });
 }
-  const text = document.getElementById('ccal-template').value;
-  const html = document.getElementById('ccal-template-html').value;
-  if (!cid || !date) { log('ccal-log','Select campaign and date','err'); return; }
-  fetch(API+'/api/campaigns/'+cid+'/calendar', {
-    method:'POST', headers:{'Content-Type':'application/json'},
-    body: JSON.stringify({campaign_id:parseInt(cid), scheduled_date:date, lead_source:source,
-      interval_days:parseInt(interval), subject_template:subject, template_text:text, template_html:html})
-  }).then(r=>r.json()).then(d=>{
-    log('ccal-log','Calendar entry added for '+date, 'ok');
-    loadCampaignCalendar(cid);
-  });
-}
 
 // ========== ADVANCED ANALYTICS ==========
 function loadAdvancedAnalytics() {
@@ -1858,6 +1758,18 @@ function drawDailyChart(dailyData) {
   html += '</div>';
   document.getElementById('ana-daily-chart').innerHTML = html;
 }
+
+// ========== BUILD STATE GRID ==========
+function buildStateGrid() {
+  const US_STATES = ['AL','AK','AZ','AR','CA','CO','CT','DE','FL','GA','HI','ID','IL','IN','IA','KS','KY','LA','ME','MD','MA','MI','MN','MS','MO','MT','NE','NV','NH','NJ','NM','NY','NC','ND','OH','OK','OR','PA','RI','SC','SD','TN','TX','UT','VT','VA','WA','WV','WI','WY'];
+  const STATE_NAMES = {AL:'Alabama',AK:'Alaska',AZ:'Arizona',AR:'Arkansas',CA:'California',CO:'Colorado',CT:'Connecticut',DE:'Delaware',FL:'Florida',GA:'Georgia',HI:'Hawaii',ID:'Idaho',IL:'Illinois',IN:'Indiana',IA:'Iowa',KS:'Kansas',KY:'Kentucky',LA:'Louisiana',ME:'Maine',MD:'Maryland',MA:'Massachusetts',MI:'Michigan',MN:'Minnesota',MS:'Mississippi',MO:'Missouri',MT:'Montana',NE:'Nebraska',NV:'Nevada',NH:'New Hampshire',NJ:'New Jersey',NM:'New Mexico',NY:'New York',NC:'North Carolina',ND:'North Dakota',OH:'Ohio',OK:'Oklahoma',OR:'Oregon',PA:'Pennsylvania',RI:'Rhode Island',SC:'South Carolina',SD:'South Dakota',TN:'Tennessee',TX:'Texas',UT:'Utah',VT:'Vermont',VA:'Virginia',WA:'Washington',WV:'West Virginia',WI:'Wisconsin',WY:'Wyoming'};
+  const grid = document.getElementById('state-grid');
+  if (!grid) return;
+  grid.innerHTML = US_STATES.map(function(code) {
+    return '<div class="state-btn" onclick="toggleState(\''+code+'\')" id="st-'+code+'" style="padding:6px 10px;background:var(--panel2);border:1px solid var(--border);border-radius:4px;cursor:pointer;font-size:11px;color:var(--muted);transition:all .15s" title="Click to schedule '+STATE_NAMES[code]+'">'+code+'</div>';
+  }).join('');
+}
+buildStateGrid();
 
 // ========== INIT ==========
 checkAuth();
