@@ -639,7 +639,10 @@ function sendConfirmed() {
     setBtn('out-send-btn', false);
     const msg = d.message || d.detail || JSON.stringify(d);
     log('out-log', msg, d.success===false||d.detail?'err':'ok');
-    if (d.stats) log('out-log', 'Stats: sent='+d.stats.sent+', failed='+d.stats.failed, 'ok');
+    if (d.stats) {
+      if (d.stats.queued !== undefined) log('out-log', 'Queued: '+d.stats.queued+' emails (sending in background)', 'info');
+      else log('out-log', 'Stats: sent='+d.stats.sent+', failed='+d.stats.failed, 'ok');
+    }
     outSelectedIds = new Set();
     document.getElementById('out-preview-section').style.display = 'none';
     document.getElementById('out-send-btn').style.display = 'none';
