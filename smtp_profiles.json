@@ -2,9 +2,9 @@
   {
     "profile_name": "Sales Gmail",
     "smtp_host": "smtp.gmail.com",
-    "smtp_port": 587,
+    "smtp_port": 465,
     "smtp_email": "sales@growthdeskva.com",
     "smtp_password": "dyqcedxmufryvcze",
-    "is_default": false
+    "is_default": true
   }
 ]

@@ -150,25 +150,39 @@ class OutreachAgent(BaseAgent):
             msg.attach(MIMEText(message, "plain"))
 
             context = ssl.create_default_context()
-            port = self.smtp_profile.smtp_port
             host = self.smtp_profile.smtp_host
+            email_addr = self.smtp_profile.smtp_email
+            password = self.smtp_profile.smtp_password
             timeout = 10
 
-            if port == 465:
-                with smtplib.SMTP_SSL(host, port, context=context, timeout=timeout) as server:
-                    server.login(self.smtp_profile.smtp_email, self.smtp_profile.smtp_password)
-                    server.sendmail(self.smtp_profile.smtp_email, to_email, msg.as_string())
-            else:
-                with smtplib.SMTP(host, port, timeout=timeout) as server:
-                    server.ehlo()
-                    server.starttls(context=context)
-                    server.ehlo()
-                    server.login(self.smtp_profile.smtp_email, self.smtp_profile.smtp_password)
-                    server.sendmail(self.smtp_profile.smtp_email, to_email, msg.as_string())
+            ports_to_try = [self.smtp_profile.smtp_port]
+            if 465 not in ports_to_try:
+                ports_to_try.append(465)
+            if 587 not in ports_to_try:
+                ports_to_try.append(587)
 
-            logger.info("Email sent to %s (%s) via profile '%s'",
-                        lead.get("business_name"), to_email, self.smtp_profile.profile_name)
-            return True
+            for port in ports_to_try:
+                try:
+                    if port == 465:
+                        with smtplib.SMTP_SSL(host, port, context=context, timeout=timeout) as server:
+                            server.login(email_addr, password)
+                            server.sendmail(email_addr, to_email, msg.as_string())
+                    else:
+                        with smtplib.SMTP(host, port, timeout=timeout) as server:
+                            server.ehlo()
+                            server.starttls(context=context)
+                            server.ehlo()
+                            server.login(email_addr, password)
+                            server.sendmail(email_addr, to_email, msg.as_string())
+                    logger.info("Email sent to %s (%s) via port %d",
+                                lead.get("business_name"), to_email, port)
+                    return True
+                except Exception as port_err:
+                    logger.warning("Port %d failed for %s: %s", port, to_email, port_err)
+                    continue
+
+            logger.error("All SMTP ports failed for %s", to_email)
+            return False
         except Exception as e:
             logger.error("Failed to send email to %s: %s", to_email, e)
             return False
