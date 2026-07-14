@@ -279,6 +279,8 @@ def init_db():
                 country TEXT NOT NULL,
                 state TEXT NOT NULL DEFAULT '',
                 city TEXT NOT NULL DEFAULT '',
+                scheduled_day TEXT DEFAULT '',
+                scheduled_time TEXT DEFAULT '',
                 target_type TEXT DEFAULT 'scout',
                 enabled INTEGER DEFAULT 1,
                 created_at REAL DEFAULT (strftime('%s','now'))
@@ -322,6 +324,16 @@ def init_db():
                 UNIQUE(date, metric, dimension)
             );
         """)
+
+        # Migration: add geo_target columns that may not exist on older DBs
+        for col, typedef in [
+            ("scheduled_day", "TEXT DEFAULT ''"),
+            ("scheduled_time", "TEXT DEFAULT ''"),
+        ]:
+            try:
+                conn.execute(f"ALTER TABLE geo_targets ADD COLUMN {col} {typedef}")
+            except Exception:
+                pass
 
         # Seed default users if not present
         existing = conn.execute("SELECT COUNT(*) as c FROM users").fetchone()["c"]
@@ -713,6 +725,23 @@ def get_outreach_candidates(limit: int = 25, lead_type: str = None) -> list[dict
         params.append(limit)
         rows = conn.execute(query, params).fetchall()
         return [_row_to_dict(r) for r in rows]
+
+
+def is_email_already_contacted(email: str) -> bool:
+    with db_conn() as conn:
+        row = conn.execute(
+            "SELECT 1 FROM leads WHERE business_email = ? AND status = 'contacted' LIMIT 1",
+            (email,),
+        ).fetchone()
+        return row is not None
+
+
+def get_contacted_emails() -> set:
+    with db_conn() as conn:
+        rows = conn.execute(
+            "SELECT business_email FROM leads WHERE status = 'contacted' AND business_email IS NOT NULL AND business_email != ''"
+        ).fetchall()
+        return {r["business_email"] for r in rows}
 
 
 def mark_leads_contacted(ids: list[int], channel: str = "email"):

@@ -5,10 +5,7 @@ Sends follow-up messages to leads that were contacted but haven't responded
 within a cooldown window, up to a max number of attempts, then marks them
 as no_response.
 
-Campaign-aware: skips leads that are enrolled in an active campaign
-(those are handled by daemon.py + campaign.py).
-
-Now also handles campaign calendar entries: sends scheduled follow-ups
+Processes followup calendar entries: sends scheduled follow-ups
 based on calendar dates with custom templates.
 
 Integrates with deliverability infrastructure:
@@ -17,8 +14,6 @@ Integrates with deliverability infrastructure:
   - send_limiter: Rate limiting
 
 Reply detection is ALWAYS active — no manual marking needed.
-
-Lead source filter: can target scout leads only, imported leads only, or all.
 
 Reads/Writes: leads (database), email_log, campaign_calendar
 """
@@ -44,7 +39,7 @@ MAX_FOLLOWUPS = 3
 class FollowupAgent(BaseAgent):
     name = "FollowupAgent"
     display_name = "Followup"
-    description = "Re-engages contacted leads after 48h cooldown, max 3 attempts. Skips campaign-enrolled leads. Sends calendar-scheduled campaign messages."
+    description = "Re-engages contacted leads after 48h cooldown, max 3 attempts. Sends calendar-scheduled followup messages."
     requires_keys = ["GROQ_API_KEY"]
 
     def __init__(self):
@@ -106,8 +101,8 @@ class FollowupAgent(BaseAgent):
         except Exception as e:
             logger.warning("Reply scan failed (continuing anyway): %s", e)
 
-        # Step 2: Process campaign calendar entries (scheduled followups)
-        calendar_sent = self._process_campaign_calendar(lead_source)
+        # Step 2: Process followup calendar entries (scheduled followups)
+        calendar_sent = self._process_calendar(lead_source)
 
         # Step 3: Get leads from database
         try:
@@ -204,27 +199,24 @@ class FollowupAgent(BaseAgent):
                                  "campaign_enrolled": len(campaign_leads)},
                           duration=duration)
 
-    def _process_campaign_calendar(self, lead_source: str) -> int:
-        """Process campaign calendar entries that are due. Returns count sent."""
+    def _process_calendar(self, lead_source: str) -> int:
+        """Process followup calendar entries that are due. Returns count sent."""
         try:
-            from app.database import db_conn
+            from app.database import db_conn, is_email_already_contacted
             from datetime import datetime
             today = datetime.now().strftime("%Y-%m-%d")
             sent = 0
 
             with db_conn() as conn:
-                # Get calendar entries due today
                 entries = conn.execute(
-                    """SELECT cc.*, c.name as campaign_name, c.id as cid
+                    """SELECT cc.*, 1 as cid, '' as campaign_name
                        FROM campaign_calendar cc
-                       JOIN campaigns c ON cc.campaign_id = c.id
                        WHERE cc.scheduled_date <= ? AND cc.active = 1""",
                     (today,),
                 ).fetchall()
 
                 for entry in entries:
                     entry = dict(entry)
-                    # Get leads for this campaign based on lead_source
                     if entry["lead_source"] == "all" or lead_source == "all":
                         leads_query = "SELECT * FROM leads WHERE business_email IS NOT NULL AND business_email != ''"
                         if lead_source == "scraped":
@@ -245,7 +237,7 @@ class FollowupAgent(BaseAgent):
 
                     template_text = entry["template_text"] or entry["template_html"] or ""
                     template_html = entry["template_html"] or ""
-                    subject_template = entry["subject_template"] or "Follow-up from {campaign_name}"
+                    subject_template = entry["subject_template"] or "Follow-up"
                     is_html = bool(template_html)
 
                     sender = self._get_email_sender()
@@ -254,18 +246,18 @@ class FollowupAgent(BaseAgent):
                         email = lead.get("business_email", "")
                         if not email:
                             continue
+                        if is_email_already_contacted(email):
+                            continue
 
                         body = template_text
                         if is_html:
                             body = template_html.format(
                                 business_name=lead.get("business_name", "there"),
-                                campaign_name=entry.get("campaign_name", ""),
                                 niche=lead.get("niche", ""),
                             )
                         else:
                             body = body.format(
                                 business_name=lead.get("business_name", "there"),
-                                campaign_name=entry.get("campaign_name", ""),
                                 niche=lead.get("niche", ""),
                             )
 
@@ -282,7 +274,7 @@ class FollowupAgent(BaseAgent):
 
                 return sent
         except Exception as e:
-            logger.warning("Campaign calendar processing error: %s", e)
+            logger.warning("Calendar processing error: %s", e)
             return 0
 
     def _load_leads_from_json(self) -> list:

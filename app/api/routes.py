@@ -291,6 +291,7 @@ def get_outreach_config():
             "custom_template_html": s.custom_template_html,
             "use_html_template": s.use_html_template,
             "ai_email_enabled": s.ai_email_enabled,
+            "email_method": getattr(s, "email_method", "auto"),
         }
     except Exception:
         return {
@@ -301,6 +302,7 @@ def get_outreach_config():
             "use_custom_template": False, "custom_template": "",
             "custom_template_html": "", "use_html_template": False,
             "ai_email_enabled": True,
+            "email_method": "auto",
         }
 
 
@@ -308,7 +310,7 @@ def get_outreach_config():
 def save_outreach_config(cfg: dict):
     try:
         from outreach_config import StyleConfig, save_style_config
-        save_style_config(StyleConfig(
+        s = StyleConfig(
             tone=cfg.get("tone", "professional"),
             max_words=int(cfg.get("max_words", 9999999)),
             subject_template=cfg.get("subject_template", ""),
@@ -319,7 +321,9 @@ def save_outreach_config(cfg: dict):
             custom_template_html=cfg.get("custom_template_html", ""),
             use_html_template=cfg.get("use_html_template", False),
             ai_email_enabled=cfg.get("ai_email_enabled", True),
-        ))
+        )
+        s.email_method = cfg.get("email_method", "auto")
+        save_style_config(s)
         return {"saved": True}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
@@ -764,190 +768,20 @@ def leads_count():
         return {"total": 0, "new": 0, "contacted": 0, "outreach_ready": 0}
 
 
-# ---------------------------------------------------------------------------
-# Campaigns
-# ---------------------------------------------------------------------------
-
-@router.get("/api/campaigns")
-def list_campaigns():
+@router.post("/api/leads/check-contacted")
+def check_leads_contacted(request: dict):
+    """Check which emails have already been contacted."""
+    emails = request.get("emails", [])
+    if not emails:
+        raise HTTPException(status_code=400, detail="emails list is required")
     try:
-        from campaign import get_campaign_manager
-        cm = get_campaign_manager()
-        campaigns = cm.list_campaigns()
-        return [{"id": c.campaign_id, "name": c.name, "description": c.description,
-                 "status": c.status, "steps": len(c.steps),
-                 "created_at": c.created_at} for c in campaigns]
+        from app.database import is_email_already_contacted
+        contacted = {}
+        for email in emails:
+            contacted[email] = is_email_already_contacted(email)
+        return {"contacted": contacted}
     except Exception:
-        return []
-
-
-@router.post("/api/campaigns")
-def create_campaign(request: dict):
-    try:
-        from campaign import get_campaign_manager
-        cm = get_campaign_manager()
-        campaign_id = cm.create_campaign(
-            name=request.get("name", "Untitled Campaign"),
-            description=request.get("description", ""),
-            steps=request.get("steps", []),
-        )
-        return {"success": True, "campaign_id": campaign_id}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-@router.get("/api/campaigns/{campaign_id}")
-def get_campaign(campaign_id: int):
-    try:
-        from campaign import get_campaign_manager
-        cm = get_campaign_manager()
-        camp = cm.get_campaign(campaign_id)
-        if not camp:
-            raise HTTPException(status_code=404, detail="Campaign not found")
-        stats = cm.get_campaign_stats(campaign_id)
-        return {
-            "id": camp.campaign_id, "name": camp.name, "description": camp.description,
-            "status": camp.status, "created_at": camp.created_at,
-            "steps": [{"id": s.step_id, "order": s.step_order, "day_offset": s.day_offset,
-                       "subject": s.subject_template, "body": s.body_template,
-                       "channel": s.channel, "ai": s.is_ai_generated} for s in camp.steps],
-            "stats": stats,
-        }
-    except HTTPException:
-        raise
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-@router.post("/api/campaigns/{campaign_id}/status")
-def update_campaign_status(campaign_id: int, request: dict):
-    try:
-        from campaign import get_campaign_manager
-        cm = get_campaign_manager()
-        cm.update_campaign_status(campaign_id, request.get("status", "active"))
-        return {"success": True}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-@router.delete("/api/campaigns/{campaign_id}")
-def delete_campaign(campaign_id: int):
-    try:
-        from campaign import get_campaign_manager
-        cm = get_campaign_manager()
-        cm.delete_campaign(campaign_id)
-        return {"success": True}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-@router.post("/api/campaigns/{campaign_id}/enroll")
-def enroll_leads(campaign_id: int, request: dict):
-    try:
-        from campaign import get_campaign_manager
-        cm = get_campaign_manager()
-        result = cm.enroll_leads(campaign_id, request.get("lead_ids", []))
-        return {"success": True, **result}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-@router.get("/api/campaigns/{campaign_id}/enrollments")
-def get_enrollments(campaign_id: int):
-    try:
-        from campaign import get_campaign_manager
-        cm = get_campaign_manager()
-        return cm.get_enrollments(campaign_id)
-    except Exception as e:
-        return []
-
-
-# ---------------------------------------------------------------------------
-# Scheduler
-# ---------------------------------------------------------------------------
-
-@router.get("/api/schedules")
-def list_schedules():
-    try:
-        from scheduler import get_scheduler
-        sched = get_scheduler()
-        schedules = sched.list_schedules()
-        return [{"id": s.schedule_id, "name": s.name, "agent": s.agent_name,
-                 "interval_minutes": s.interval_minutes, "enabled": s.enabled,
-                 "config": s.config, "last_run_at": s.last_run_at,
-                 "next_run_at": s.next_run_at} for s in schedules]
-    except Exception:
-        return []
-
-
-@router.post("/api/schedules")
-def create_schedule(request: dict):
-    try:
-        from scheduler import get_scheduler
-        sched = get_scheduler()
-        schedule_id = sched.create_schedule(
-            name=request.get("name", "unnamed"),
-            agent_name=request.get("agent_name", ""),
-            interval_minutes=int(request.get("interval_minutes", 60)),
-            config=request.get("config", {}),
-            enabled=request.get("enabled", True),
-        )
-        return {"success": True, "schedule_id": schedule_id}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-@router.post("/api/schedules/{schedule_id}/run")
-def run_schedule_now(schedule_id: int):
-    try:
-        from scheduler import get_scheduler
-        sched = get_scheduler()
-        result = sched.run_schedule_now(schedule_id)
-        return result
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-@router.post("/api/schedules/{schedule_id}/toggle")
-def toggle_schedule(schedule_id: int, request: dict):
-    try:
-        from scheduler import get_scheduler
-        sched = get_scheduler()
-        sched.toggle_schedule(schedule_id, request.get("enabled", True))
-        return {"success": True}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-@router.delete("/api/schedules/{schedule_id}")
-def delete_schedule(schedule_id: int):
-    try:
-        from scheduler import get_scheduler
-        sched = get_scheduler()
-        sched.delete_schedule(schedule_id)
-        return {"success": True}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-@router.get("/api/schedules/{schedule_id}/runs")
-def schedule_runs(schedule_id: int, limit: int = 50):
-    try:
-        from scheduler import get_scheduler
-        sched = get_scheduler()
-        return sched.get_run_history(schedule_id, limit)
-    except Exception:
-        return []
-
-
-@router.get("/api/scheduler/status")
-def scheduler_status():
-    try:
-        from scheduler import get_scheduler
-        sched = get_scheduler()
-        return {"running": sched.is_running, "schedules": len(sched.list_schedules())}
-    except Exception:
-        return {"running": False, "schedules": 0}
+        return {"contacted": {e: False for e in emails}}
 
 
 # ---------------------------------------------------------------------------
@@ -1059,6 +893,29 @@ def check_spam(request: dict):
 
 
 # ---------------------------------------------------------------------------
+# Send Limits
+# ---------------------------------------------------------------------------
+
+@router.get("/api/send-limits/status")
+def send_limits_status():
+    """Gmail API daily send cap status."""
+    try:
+        from send_limiter import get_send_limiter
+        limiter = get_send_limiter()
+        status = limiter.get_all_status()
+        gmail_daily = status.get("gmail_daily", {})
+        sent = gmail_daily.get("sent_today", 0)
+        limit = gmail_daily.get("daily_limit", 2000)
+        return {
+            "gmail_daily_limit": limit,
+            "gmail_daily_sent": sent,
+            "remaining": max(0, limit - sent),
+        }
+    except Exception:
+        return {"gmail_daily_limit": 2000, "gmail_daily_sent": 0, "remaining": 2000}
+
+
+# ---------------------------------------------------------------------------
 # Geography / Word Map
 # ---------------------------------------------------------------------------
 
@@ -1079,12 +936,15 @@ def add_geo_target(request: dict):
         from app.database import db_conn
         with db_conn() as conn:
             cur = conn.execute(
-                "INSERT INTO geo_targets (country, state, city, target_type) VALUES (?, ?, ?, ?)",
+                """INSERT INTO geo_targets (country, state, city, target_type, scheduled_day, scheduled_time)
+                   VALUES (?, ?, ?, ?, ?, ?)""",
                 (
                     request.get("country", "United States"),
                     request.get("state", ""),
                     request.get("city", ""),
                     request.get("target_type", "scout"),
+                    request.get("scheduled_day", ""),
+                    request.get("scheduled_time", ""),
                 ),
             )
             return {"id": cur.lastrowid}
@@ -1103,12 +963,89 @@ def delete_geo_target(target_id: int):
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@router.put("/api/geo/targets/{target_id}")
+def update_geo_target(target_id: int, request: dict):
+    """Update scheduled_day and scheduled_time for a geo target."""
+    try:
+        from app.database import db_conn
+        with db_conn() as conn:
+            updates = []
+            params = []
+            if "scheduled_day" in request:
+                updates.append("scheduled_day = ?")
+                params.append(request["scheduled_day"])
+            if "scheduled_time" in request:
+                updates.append("scheduled_time = ?")
+                params.append(request["scheduled_time"])
+            if not updates:
+                raise HTTPException(status_code=400, detail="No fields to update")
+            params.append(target_id)
+            conn.execute(
+                f"UPDATE geo_targets SET {', '.join(updates)} WHERE id = ?",
+                params,
+            )
+            return {"updated": True}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/api/geo/targets/auto-scout")
+def geo_targets_auto_scout(request: dict = None):
+    """Trigger lead search for all geo targets that are due based on current day+time."""
+    try:
+        from datetime import datetime
+        from app.database import db_conn
+        today_name = datetime.now().strftime("%A")  # e.g. "Monday"
+        current_time = datetime.now().strftime("%H:%M")
+        with db_conn() as conn:
+            due = conn.execute(
+                """SELECT * FROM geo_targets
+                   WHERE scheduled_day = ? AND scheduled_time <= ?""",
+                (today_name, current_time),
+            ).fetchall()
+        results = []
+        for target in due:
+            t = dict(target)
+            try:
+                from lead_scout_agent import LeadScoutAgent, LLM, DuckDuckGoSource, DirectWebSource
+                ddg = DuckDuckGoSource()
+                direct = DirectWebSource()
+                sources = []
+                if ddg.enabled: sources.append(ddg)
+                if direct.enabled: sources.append(direct)
+                llm = LLM()
+                agent = LeadScoutAgent(None, None, llm)
+                niche = request.get("niche", "") if request else ""
+                location_parts = [p for p in [t.get("city"), t.get("state"), t.get("country")] if p]
+                query = f"{niche} in {', '.join(location_parts)}" if niche else ", ".join(location_parts)
+                leads = agent.run(query, target=request.get("target", 50) if request else 50)
+                saved = 0
+                for lead in leads:
+                    lead["lead_type"] = "scraped"
+                    lead["source"] = "geo_auto_scout"
+                    lead["address"] = lead.get("address", "") or query
+                    try:
+                        from app.database import upsert_lead
+                        upsert_lead(lead)
+                        saved += 1
+                    except Exception:
+                        pass
+                results.append({"target_id": t["id"], "leads_found": len(leads), "saved": saved})
+            except Exception as e:
+                results.append({"target_id": t["id"], "error": str(e)})
+        return {"success": True, "targets_due": len(due), "results": results}
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+
+
 # ---------------------------------------------------------------------------
 # Campaign Calendar (Followup Campaigns)
 # ---------------------------------------------------------------------------
 
-@router.post("/api/campaigns/{campaign_id}/calendar")
-def add_campaign_calendar(campaign_id: int, request: dict):
+@router.post("/api/followup/calendar")
+def add_campaign_calendar(request: dict):
     try:
         from app.database import db_conn
         with db_conn() as conn:
@@ -1118,7 +1055,7 @@ def add_campaign_calendar(campaign_id: int, request: dict):
                     template_text, subject_template, interval_days)
                    VALUES (?, ?, ?, ?, ?, ?, ?)""",
                 (
-                    campaign_id,
+                    request.get("campaign_id", 1),
                     request.get("scheduled_date", ""),
                     request.get("lead_source", "all"),
                     request.get("template_html", ""),
@@ -1132,37 +1069,52 @@ def add_campaign_calendar(campaign_id: int, request: dict):
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@router.get("/api/campaigns/{campaign_id}/calendar")
-def get_campaign_calendar(campaign_id: int):
+@router.get("/api/followup/calendar")
+def get_campaign_calendar(campaign_id: int = None):
     try:
         from app.database import db_conn
         with db_conn() as conn:
-            rows = conn.execute(
-                "SELECT * FROM campaign_calendar WHERE campaign_id = ? ORDER BY scheduled_date",
-                (campaign_id,),
-            ).fetchall()
+            if campaign_id:
+                rows = conn.execute(
+                    "SELECT * FROM campaign_calendar WHERE campaign_id = ? ORDER BY scheduled_date",
+                    (campaign_id,),
+                ).fetchall()
+            else:
+                rows = conn.execute(
+                    "SELECT * FROM campaign_calendar ORDER BY scheduled_date"
+                ).fetchall()
             return [dict(r) for r in rows]
     except Exception:
         return []
 
 
-@router.get("/api/campaigns/{campaign_id}/calendar/due")
-def due_calendar_entries(campaign_id: int):
+@router.get("/api/followup/calendar/due")
+def due_calendar_entries(campaign_id: int = None):
     """Get calendar entries whose scheduled_date is today or past."""
     try:
         from datetime import datetime
         from app.database import db_conn
         today = datetime.now().strftime("%Y-%m-%d")
         with db_conn() as conn:
-            rows = conn.execute(
-                """SELECT cc.*, c.name as campaign_name
-                   FROM campaign_calendar cc
-                   JOIN campaigns c ON cc.campaign_id = c.id
-                   WHERE cc.campaign_id = ? AND cc.scheduled_date <= ?
-                   AND cc.active = 1
-                   ORDER BY cc.scheduled_date""",
-                (campaign_id, today),
-            ).fetchall()
+            if campaign_id:
+                rows = conn.execute(
+                    """SELECT cc.*, c.name as campaign_name
+                       FROM campaign_calendar cc
+                       JOIN campaigns c ON cc.campaign_id = c.id
+                       WHERE cc.campaign_id = ? AND cc.scheduled_date <= ?
+                       AND cc.active = 1
+                       ORDER BY cc.scheduled_date""",
+                    (campaign_id, today),
+                ).fetchall()
+            else:
+                rows = conn.execute(
+                    """SELECT cc.*, c.name as campaign_name
+                       FROM campaign_calendar cc
+                       JOIN campaigns c ON cc.campaign_id = c.id
+                       WHERE cc.scheduled_date <= ? AND cc.active = 1
+                       ORDER BY cc.scheduled_date""",
+                    (today,),
+                ).fetchall()
             return [dict(r) for r in rows]
     except Exception:
         return []

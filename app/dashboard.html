@@ -102,8 +102,6 @@ tr:hover td{background:var(--panel2)}
     <div class="nav-item" onclick="showPanel('custom-pipes')" id="nav-custom-pipes"><span class="dot-s"></span> Custom Pipes</div>
     <div class="nav-item" onclick="showPanel('pending')" id="nav-pending" style="display:none"><span class="dot-s"></span> Pending <span id="pending-badge" style="background:#FF6B81;color:#fff;border-radius:8px;padding:1px 6px;font-size:10px;margin-left:4px;display:none">0</span></div>
     <div class="nav-item" onclick="showPanel('apikeys')" id="nav-apikeys"><span class="dot-s"></span> API Keys</div>
-    <div class="nav-item" onclick="showPanel('campaigns')" id="nav-campaigns"><span class="dot-s"></span> Campaigns</div>
-    <div class="nav-item" onclick="showPanel('scheduler')" id="nav-scheduler"><span class="dot-s"></span> Scheduler</div>
     <div class="nav-item" onclick="showPanel('daemon')" id="nav-daemon"><span class="dot-s"></span> Daemon</div>
     <div class="nav-item" onclick="showPanel('deliverability')" id="nav-deliverability"><span class="dot-s"></span> Deliverability</div>
   </div>
@@ -143,28 +141,36 @@ tr:hover td{background:var(--panel2)}
         </div>
       </div>
       <div class="section">
-        <h3>🌍 Word Map — Geo Targeting</h3>
+        <h3>🗺️ Word Map — Click-to-Schedule State Scouting</h3>
         <div class="row">
-          <div class="field"><label>Country</label><input type="text" id="geo-country" placeholder="e.g. United States"></div>
-          <div class="field"><label>State(s) (comma-separated)</label><input type="text" id="geo-states" placeholder="e.g. California, Texas"></div>
+          <div class="field"><label>Niche (e.g. HVAC companies)</label><input type="text" id="geo-niche" placeholder="e.g. dental clinics, roofing companies"></div>
+          <div class="field" style="flex:.3"><label>Leads per State</label><input type="number" id="geo-target" value="100"></div>
         </div>
-        <div class="row">
-          <div class="field"><label>Niche</label><input type="text" id="geo-niche" placeholder="e.g. HVAC companies"></div>
-          <div class="field" style="flex:.5"><label>Target</label><input type="number" id="geo-target" value="50"></div>
-          <div class="field" style="flex:.5"><label>Type</label><select id="geo-type"><option value="scout">Scout</option><option value="outreach">Outreach</option></select></div>
+        <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px" id="state-grid">
+          <script>
+            const US_STATES = ['AL','AK','AZ','AR','CA','CO','CT','DE','FL','GA','HI','ID','IL','IN','IA','KS','KY','LA','ME','MD','MA','MI','MN','MS','MO','MT','NE','NV','NH','NJ','NM','NY','NC','ND','OH','OK','OR','PA','RI','SC','SD','TN','TX','UT','VT','VA','WA','WV','WI','WY'];
+            const STATE_NAMES = {AL:'Alabama',AK:'Alaska',AZ:'Arizona',AR:'Arkansas',CA:'California',CO:'Colorado',CT:'Connecticut',DE:'Delaware',FL:'Florida',GA:'Georgia',HI:'Hawaii',ID:'Idaho',IL:'Illinois',IN:'Indiana',IA:'Iowa',KS:'Kansas',KY:'Kentucky',LA:'Louisiana',ME:'Maine',MD:'Maryland',MA:'Massachusetts',MI:'Michigan',MN:'Minnesota',MS:'Mississippi',MO:'Missouri',MT:'Montana',NE:'Nebraska',NV:'Nevada',NH:'New Hampshire',NJ:'New Jersey',NM:'New Mexico',NY:'New York',NC:'North Carolina',ND:'North Dakota',OH:'Ohio',OK:'Oklahoma',OR:'Oregon',PA:'Pennsylvania',RI:'Rhode Island',SC:'South Carolina',SD:'South Dakota',TN:'Tennessee',TX:'Texas',UT:'Utah',VT:'Vermont',VA:'Virginia',WA:'Washington',WV:'West Virginia',WI:'Wisconsin',WY:'Wyoming'};
+            const DAYS = ['Monday','Tuesday','Wednesday','Thursday','Friday','Saturday','Sunday'];
+            document.getElementById('state-grid').innerHTML = US_STATES.map(code =>
+              '<div class="state-btn" onclick="toggleState(\''+code+'\')" id="st-'+code+'" style="padding:6px 10px;background:var(--panel2);border:1px solid var(--border);border-radius:4px;cursor:pointer;font-size:11px;color:var(--muted);transition:all .15s" title="Click to schedule '+STATE_NAMES[code]+'">'+code+'</div>'
+            ).join('');
+          </script>
         </div>
-        <div class="row">
-          <button class="btn-violet" onclick="runGeoScout()">🔍 Geo Scout</button>
-          <button onclick="addGeo()">+ Add Target</button>
+        <div class="row" style="gap:6px">
+          <div class="field" style="flex:.3"><label>Run Day</label><select id="geo-day"><option value="">Select Day</option><option>Monday</option><option>Tuesday</option><option>Wednesday</option><option>Thursday</option><option>Friday</option><option>Saturday</option><option>Sunday</option></select></div>
+          <div class="field" style="flex:.2"><label>Time (24h)</label><input type="time" id="geo-time" value="05:00"></div>
+          <button onclick="scheduleSelectedStates()" class="btn-violet" style="align-self:flex-end">📅 Schedule Selected</button>
+          <button onclick="runScheduledGeoScout()" id="geo-run-all-btn" style="align-self:flex-end">▶ Run All Due Now</button>
         </div>
+        <div style="margin-top:6px;font-size:11px;color:var(--muted)">Click state abbreviation to select. Then set day+time and click Schedule. Daemon auto-runs scout for each scheduled state on its day/time.</div>
         <div class="tbl-wrap" style="margin-top:8px">
-          <table><thead><tr><th>Country</th><th>State</th><th>City</th><th>Type</th><th>Status</th><th></th></tr></thead><tbody id="geo-tbody"></tbody></table>
+          <table><thead><tr><th>State</th><th>Day</th><th>Time</th><th>Status</th><th>Last Run</th><th></th></tr></thead><tbody id="geo-tbody"></tbody></table>
         </div>
       </div>
       <div class="section" id="geo-results-section" style="display:none">
         <h3>Geo Results</h3>
         <div class="tbl-wrap">
-          <table><thead><tr><th>Business</th><th>Email</th><th>Phone</th><th>Source</th></tr></thead><tbody id="geo-results-tbody"></tbody></table>
+          <table><thead><tr><th>Business</th><th>Email</th><th>Phone</th><th>Owner</th><th>Source</th></tr></thead><tbody id="geo-results-tbody"></tbody></table>
         </div>
       </div>
       <div class="section">
@@ -233,6 +239,24 @@ No character limit." style="width:100%;font-family:Consolas,monospace;font-size:
         <div class="row">
           <button onclick="saveOutreachConfig()">Save Template</button>
           <span id="out-tmpl-status"></span>
+        </div>
+      </div>
+      <div class="section">
+        <h3>📨 Email Method</h3>
+        <div class="row">
+          <div class="field" style="flex:.5">
+            <label>Sending Method</label>
+            <select id="out-email-method" onchange="saveOutreachConfig()">
+              <option value="auto">Auto (Gmail API → SMTP fallback)</option>
+              <option value="gmail">Gmail API Only</option>
+              <option value="smtp">SMTP Only</option>
+            </select>
+          </div>
+          <div class="field" style="flex:.5">
+            <label>Daily Gmail API Limit</label>
+            <span style="font-size:16px;font-weight:700;color:var(--cyan)" id="out-gmail-status">2000 / 2000</span>
+          </div>
+          <div style="font-size:11px;color:var(--muted);flex:1">When Gmail limit (2000/day) reached, auto-switches to scout leads</div>
         </div>
       </div>
       <div class="section">
@@ -333,14 +357,38 @@ No character limit." style="width:100%;font-family:Consolas,monospace;font-size:
       <div class="section"><h3>Activity Log</h3><div class="log" id="out-log"></div></div>
     </div>
 
-    <!-- FOLLOWUP -->
+    <!-- FOLLOWUP + CAMPAIGN CALENDAR -->
     <div class="panel" id="panel-followup">
       <div class="panel-title">Followup Agent</div>
-      <div class="panel-desc">Re-contacts leads that haven't responded within 48 hours. Automatically skips replied leads.</div>
+      <div class="panel-desc">Always running via daemon. Schedules date-based custom messages to leads. No manual run needed.</div>
       <div class="section">
-        <button onclick="runAgent('followup','FollowupAgent')" id="fu-btn">Run Followup</button>
-        <div class="log" id="fu-log" style="margin-top:12px"></div>
+        <h3>📅 Campaign Calendar — Scheduled Sends</h3>
+        <div class="row">
+          <div class="field"><label>Send Date</label><input type="date" id="fu-date"></div>
+          <div class="field"><label>Lead Source</label><select id="fu-source"><option value="all">All Leads</option><option value="scraped">Scout Leads Only</option><option value="imported">Imported Leads Only</option></select></div>
+        </div>
+        <div class="row">
+          <div class="field"><label>Subject</label><input type="text" id="fu-subject" placeholder="Follow-up: {business_name}"></div>
+          <div class="field" style="flex:.4"><label>Repeat Interval (days)</label><input type="number" id="fu-interval" value="1" min="0"></div>
+        </div>
+        <div class="row">
+          <div class="field"><label>Template (Text)</label><textarea id="fu-template-text" rows="4" placeholder="Hi {business_name}, ..."></textarea></div>
+        </div>
+        <div class="row">
+          <div class="field"><label>Template (HTML — optional)</label><textarea id="fu-template-html" rows="4" placeholder="<html><body>Hi {business_name}, ...</body></html>"></textarea></div>
+        </div>
+        <div class="row">
+          <button onclick="addCalendarEntry()">+ Add Calendar Entry</button>
+          <span id="fu-status"></span>
+        </div>
       </div>
+      <div class="section">
+        <h3>Scheduled Entries</h3>
+        <div class="tbl-wrap">
+          <table><thead><tr><th>Date</th><th>Source</th><th>Subject</th><th>Interval</th><th>Active</th><th></th></tr></thead><tbody id="fu-tbody"></tbody></table>
+        </div>
+      </div>
+      <div class="section"><h3>Activity Log</h3><div class="log" id="fu-log"></div></div>
     </div>
 
     <!-- REPLIES -->
@@ -428,15 +476,21 @@ No character limit." style="width:100%;font-family:Consolas,monospace;font-size:
       <div class="panel-desc">Manage API keys for all agents. Keys are saved to .env.</div>
       <div class="section" id="apikey-list"></div>
       <div class="section">
-        <h3>📧 Gmail API (OAuth2) — For sending emails on Railway</h3>
-        <div id="gmail-status">Checking...</div>
-        <div class="row" style="margin-top:8px">
+        <h3>🔑 Google OAuth (Gmail API) — Add Your Credentials</h3>
+        <div class="row">
+          <div class="field"><label>Google Client ID</label><input type="text" id="key-google-id" placeholder="Paste your GOOGLE_CLIENT_ID"></div>
+          <div class="field"><label>Google Client Secret</label><input type="password" id="key-google-secret" placeholder="Paste your GOOGLE_CLIENT_SECRET"></div>
+        </div>
+        <div class="row">
+          <div class="field"><label>Gmail Sender Email</label><input type="email" id="key-gmail-email" placeholder="you@gmail.com"></div>
+          <div class="field"><label>Redirect URI</label><input type="text" id="key-redirect-uri" placeholder="https://your-app.railway.app/api/gmail/callback"></div>
+        </div>
+        <div class="row">
+          <button onclick="saveGoogleOAuthKeys()" class="btn-violet">💾 Save Google Credentials</button>
           <button id="gmail-auth-btn" onclick="startGmailAuth()" style="display:none" class="btn-green">🔑 Authorize Gmail API</button>
+          <span id="key-gmail-status"></span>
         </div>
-        <div style="font-size:11px;color:var(--muted);margin-top:6px">
-          Setup: Set GOOGLE_CLIENT_ID + GOOGLE_CLIENT_SECRET + GMAIL_SENDER_EMAIL in .env.
-          Then click Authorize and sign in with your Gmail account.
-        </div>
+        <div id="gmail-status" style="margin-top:8px;font-size:12px">Checking...</div>
       </div>
       <div class="section"><h3>Activity Log</h3><div class="log" id="gmail-log"></div></div>
     </div>
@@ -557,57 +611,7 @@ No character limit." style="width:100%;font-family:Consolas,monospace;font-size:
       <div class="section"><h3>Activity Log</h3><div class="log" id="pend-log"></div></div>
     </div>
 
-    <!-- CAMPAIGNS -->
-    <div class="panel" id="panel-campaigns">
-      <div class="panel-title">Campaign Manager</div>
-      <div class="panel-desc">Create multi-step outreach campaigns with scheduling and auto-enrollment.</div>
-      <div class="section">
-        <h3>Create Campaign</h3>
-        <div class="row">
-          <div class="field"><label>Campaign Name</label><input type="text" id="cmp-name" placeholder="e.g. HVAC Outreach Q1"></div>
-          <div class="field"><label>Target Lead Type</label><input type="text" id="cmp-target" placeholder="e.g. hvac"></div>
-        </div>
-        <div class="row">
-          <div class="field"><label>Agent</label><select id="cmp-agent"><option value="outreach">Outreach</option><option value="followup">Followup</option><option value="appointment">Appointment</option><option value="deal_closer">Deal Closer</option></select></div>
-          <div class="field"><label>Interval (seconds)</label><input type="number" id="cmp-interval" value="3600"></div>
-        </div>
-        <div class="row">
-          <button onclick="createCampaign()">Create Campaign</button>
-          <span id="cmp-status"></span>
-        </div>
-      </div>
-      <div class="section">
-        <h3>Active Campaigns</h3>
-        <div class="tbl-wrap">
-          <table><thead><tr><th>Name</th><th>Target</th><th>Agent</th><th>Interval</th><th>Active</th><th>Actions</th></tr></thead><tbody id="cmp-tbody"></tbody></table>
-        </div>
-      </div>
-      <div class="section"><h3>Activity Log</h3><div class="log" id="cmp-log"></div></div>
-    </div>
 
-    <!-- SCHEDULER -->
-    <div class="panel" id="panel-scheduler">
-      <div class="panel-title">Agent Scheduler</div>
-      <div class="panel-desc">Schedule agents to run at fixed intervals. Daemon processes all schedules.</div>
-      <div class="section">
-        <h3>Create Schedule</h3>
-        <div class="row">
-          <div class="field"><label>Schedule Name</label><input type="text" id="sch-name" placeholder="e.g. Hourly Outreach"></div>
-          <div class="field"><label>Agent</label><select id="sch-agent"><option value="outreach">Outreach</option><option value="followup">Followup</option><option value="appointment">Appointment</option><option value="deal_closer">Deal Closer</option><option value="report">Report</option></select></div>
-        </div>
-        <div class="row">
-          <div class="field"><label>Interval (seconds)</label><input type="number" id="sch-interval" value="3600"></div>
-          <button onclick="createSchedule()">Create Schedule</button>
-        </div>
-      </div>
-      <div class="section">
-        <h3>Active Schedules</h3>
-        <div class="tbl-wrap">
-          <table><thead><tr><th>Name</th><th>Agent</th><th>Interval</th><th>Active</th><th>Last Run</th><th>Actions</th></tr></thead><tbody id="sch-tbody"></tbody></table>
-        </div>
-      </div>
-      <div class="section"><h3>Activity Log</h3><div class="log" id="sch-log"></div></div>
-    </div>
 
     <!-- DAEMON -->
     <div class="panel" id="panel-daemon">
@@ -689,8 +693,8 @@ function showPanel(name) {
   document.getElementById('panel-'+name).classList.add('active');
   document.getElementById('nav-'+name).classList.add('active');
   // Load panel data on switch
-  if (name==='campaigns') loadCampaigns();
-  if (name==='scheduler') loadSchedules();
+  if (name==='scout') loadGeo();
+  if (name==='followup') loadCalendar();
   if (name==='daemon') loadDaemon();
   if (name==='deliverability') loadDeliverability();
 }
@@ -874,28 +878,49 @@ function updateSelectedCount() {
   document.getElementById('out-selected-count').textContent = outSelectedIds.size+' selected';
 }
 
+function previewOutreachWithDedup() {
+  previewOutreach();
+}
+
 function sendConfirmed() {
   if (outSelectedIds.size === 0) { alert('Select at least one lead'); return; }
-  if (!confirm('Send emails to '+outSelectedIds.size+' leads?')) return;
-  const channel = document.getElementById('out-channel').value;
-  setBtn('out-send-btn', true);
-  log('out-log', 'Sending to '+outSelectedIds.size+' confirmed leads...', 'info');
-
-  fetch(API+'/api/outreach/send', {
+  // Dedup check: warn if some leads already contacted
+  const candidateEmails = outPreviewData.filter(c => outSelectedIds.has(c.id)).map(c => c.business_email).filter(Boolean);
+  fetch(API+'/api/leads/check-contacted', {
     method:'POST', headers:{'Content-Type':'application/json'},
-    body: JSON.stringify({lead_ids: Array.from(outSelectedIds), channel: channel})
-  }).then(r=>r.json()).then(d=>{
-    setBtn('out-send-btn', false);
-    const msg = d.message || d.detail || JSON.stringify(d);
-    log('out-log', msg, 'info');
-    if (d.job_id) {
-      log('out-log', 'Job ID: '+d.job_id+' — polling status...', 'info');
-      pollSendStatus(d.job_id);
+    body: JSON.stringify({emails: candidateEmails})
+  }).then(r=>r.json()).then(dedup=>{
+    const already = (dedup.contacted||{});
+    const alreadyCount = Object.values(already).filter(Boolean).length;
+    if (alreadyCount > 0) {
+      if (!confirm('Warning: '+alreadyCount+' of '+candidateEmails.length+' leads may already be contacted. Continue sending?')) {
+        setBtn('out-send-btn', false);
+        return;
+      }
     }
-    outSelectedIds = new Set();
-    document.getElementById('out-preview-section').style.display = 'none';
-    document.getElementById('out-send-btn').style.display = 'none';
-  }).catch(e=>{ setBtn('out-send-btn', false); log('out-log', 'ERROR: '+e, 'err'); });
+    if (!confirm('Send emails to '+outSelectedIds.size+' leads?')) return;
+    const channel = document.getElementById('out-channel').value;
+    setBtn('out-send-btn', true);
+    log('out-log', 'Sending to '+outSelectedIds.size+' confirmed leads...', 'info');
+
+    fetch(API+'/api/outreach/send', {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({lead_ids: Array.from(outSelectedIds), channel: channel})
+    }).then(r=>r.json()).then(d=>{
+      setBtn('out-send-btn', false);
+      const msg = d.message || d.detail || JSON.stringify(d);
+      log('out-log', msg, 'info');
+      if (d.job_id) {
+        log('out-log', 'Job ID: '+d.job_id+' — polling status...', 'info');
+        pollSendStatus(d.job_id);
+      }
+      outSelectedIds = new Set();
+      document.getElementById('out-preview-section').style.display = 'none';
+      document.getElementById('out-send-btn').style.display = 'none';
+    }).catch(e=>{ setBtn('out-send-btn', false); log('out-log', 'ERROR: '+e, 'err'); });
+  }).catch(()=>{
+    log('out-log', 'Dedup check failed, sending anyway...', 'warn');
+  });
 }
 
 function pollSendStatus(jobId) {
@@ -930,11 +955,14 @@ fetch(API+'/api/outreach/config').then(r=>r.json()).then(d=>{
   document.getElementById('out-sig').value = d.signature||'';
   document.getElementById('out-use-tmpl').checked = d.use_custom_template||false;
   document.getElementById('out-tmpl').value = d.custom_template||'';
+  if (document.getElementById('out-email-method')) document.getElementById('out-email-method').value = d.email_method||'auto';
+  loadGmailDailyStatus();
 });
 
 function saveOutreachConfig() {
   const ai = document.getElementById('out-ai-toggle').checked;
   const html = document.getElementById('out-html-mode').checked;
+  const method = document.getElementById('out-email-method')?.value||'auto';
   fetch(API+'/api/outreach/config', {
     method:'POST', headers:{'Content-Type':'application/json'},
     body: JSON.stringify({
@@ -948,6 +976,7 @@ function saveOutreachConfig() {
       custom_template_html: document.getElementById('out-template-html').value,
       use_html_template: html,
       ai_email_enabled: ai,
+      email_method: method,
     })
   }).then(r=>r.json()).then(d=>{
     document.getElementById('out-tmpl-status').innerHTML='<span class="pill pill-ok">Saved</span>';
@@ -1553,19 +1582,56 @@ function loadGeo() {
   });
 }
 
-function addGeo() {
-  const country = document.getElementById('geo-country').value.trim();
-  const state = document.getElementById('geo-state').value.trim();
-  const type = document.getElementById('geo-type').value;
-  if (!country) { log('geo-log','Enter a country','err'); return; }
-  fetch(API+'/api/geo/targets', {
-    method:'POST', headers:{'Content-Type':'application/json'},
-    body: JSON.stringify({country:country, state:state, target_type:type})
-  }).then(r=>r.json()).then(d=>{
-    log('geo-log','Added: '+country+(state?', '+state:''), 'ok');
-    loadGeo();
-    document.getElementById('geo-country').value='';
-    document.getElementById('geo-state').value='';
+// ========== WORD MAP — State-based Geo Targeting with Schedule ==========
+let selectedStates = new Set();
+
+function toggleState(code) {
+  const el = document.getElementById('st-'+code);
+  if (selectedStates.has(code)) {
+    selectedStates.delete(code);
+    el.style.background = 'var(--panel2)';
+    el.style.borderColor = 'var(--border)';
+    el.style.color = 'var(--muted)';
+  } else {
+    selectedStates.add(code);
+    el.style.background = 'rgba(94,234,255,.15)';
+    el.style.borderColor = 'var(--cyan)';
+    el.style.color = 'var(--cyan)';
+  }
+}
+
+function scheduleSelectedStates() {
+  const day = document.getElementById('geo-day').value;
+  const time = document.getElementById('geo-time').value || '05:00';
+  if (!day) { alert('Select a day of the week'); return; }
+  if (selectedStates.size === 0) { alert('Click states on the map to select them first'); return; }
+
+  let completed = 0;
+  selectedStates.forEach(code => {
+    const name = (window.STATE_NAMES||{})[code] || code;
+    fetch(API+'/api/geo/targets', {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({country:'United States', state:name, target_type:'scout', scheduled_day: day, scheduled_time: time})
+    }).then(r=>r.json()).then(d=>{
+      completed++;
+      if (completed === selectedStates.size) {
+        log('geo-log', 'Scheduled '+selectedStates.size+' states for '+day+' at '+time, 'ok');
+        selectedStates.forEach(c => toggleState(c));
+        loadGeo();
+      }
+    }).catch(e=>{ log('geo-log', 'Error: '+e, 'err'); });
+  });
+}
+
+function loadGeo() {
+  fetch(API+'/api/geo/targets').then(r=>r.json()).then(d=>{
+    let html = '';
+    (d||[]).forEach(t=>{
+      const dayCol = t.scheduled_day ? '<span style="color:var(--cyan)">'+t.scheduled_day+'</span>' : '<span style="color:var(--muted)">—</span>';
+      const timeCol = t.scheduled_time ? t.scheduled_time : '—';
+      html += '<tr><td>'+(t.state||t.country||'')+'</td><td>'+dayCol+'</td><td>'+timeCol+'</td><td><span class="pill '+(t.enabled?'pill-ok':'pill-off')+'">'+(t.enabled?'Active':'Paused')+'</span></td><td style="color:var(--muted);font-size:11px">'+(t.last_run_at ? fmtDate(t.last_run_at) : 'Never')+'</td><td><button onclick="deleteGeo('+t.id+')" class="btn-red" style="padding:2px 6px;font-size:10px">✕</button></td></tr>';
+    });
+    document.getElementById('geo-tbody').innerHTML = html || '<tr><td colspan="6" style="color:var(--muted);text-align:center">No scheduled states — click states above and schedule with day+time</td></tr>';
   });
 }
 
@@ -1573,26 +1639,27 @@ function deleteGeo(id) {
   fetch(API+'/api/geo/targets/'+id, {method:'DELETE'}).then(()=>{ loadGeo(); });
 }
 
-// Scout with geo targeting
-function runGeoScout() {
+function runScheduledGeoScout() {
   const niche = document.getElementById('geo-niche').value.trim();
-  const country = document.getElementById('geo-country').value.trim();
-  const states = document.getElementById('geo-states').value.split(',').map(s=>s.trim()).filter(Boolean);
-  if (!niche) { log('geo-log','Enter a niche','err'); return; }
-  log('geo-log','Searching for "'+niche+'" in '+(country||'anywhere')+'...', 'info');
-  fetch(API+'/api/lead-scout/search-geo', {
+  if (!niche) { alert('Enter a niche first'); return; }
+  const btn = document.getElementById('geo-run-all-btn');
+  btn.disabled = true; btn.innerHTML = '<span class="spinner"></span> Running...';
+  log('geo-log', 'Running geo scout for all due schedules...', 'info');
+
+  fetch(API+'/api/geo/targets/auto-scout', {
     method:'POST', headers:{'Content-Type':'application/json'},
-    body: JSON.stringify({niche:niche, country:country, states:states, target:parseInt(document.getElementById('geo-target').value)||50})
+    body: JSON.stringify({niche: niche, target: parseInt(document.getElementById('geo-target').value)||100})
   }).then(r=>r.json()).then(d=>{
-    log('geo-log','Found '+d.total+' leads in '+d.location+'. Saved: '+d.saved, d.success?'ok':'err');
-    if (d.leads) renderGeoResults(d.leads);
-  });
+    btn.disabled = false; btn.innerHTML = '▶ Run All Due Now';
+    log('geo-log', d.message||'Geo scout complete', d.success?'ok':'err');
+    if (d.results) renderGeoResults(d.results);
+  }).catch(e=>{ btn.disabled = false; btn.innerHTML = '▶ Run All Due Now'; log('geo-log', 'Error: '+e, 'err'); });
 }
 
 function renderGeoResults(leads) {
   let html = '';
   leads.forEach(l=>{
-    html += '<tr><td>'+(l.business_name||'')+'</td><td style="color:#7D93B8">'+(l.business_email||'')+'</td><td>'+(l.phone||'')+'</td><td style="color:#5EEAFF">'+(l.source||'')+'</td></tr>';
+    html += '<tr><td>'+(l.business_name||'')+'</td><td style="color:#7D93B8">'+(l.business_email||'')+'</td><td>'+(l.phone||'')+'</td><td>'+(l.owner_name||'')+'</td><td style="color:#5EEAFF">'+(l.source||'')+'</td></tr>';
   });
   document.getElementById('geo-results-tbody').innerHTML = html || '<tr><td colspan="4" style="color:var(--muted)">No results</td></tr>';
   document.getElementById('geo-results-section').style.display = '';
@@ -1604,13 +1671,25 @@ function checkGmailAuth() {
     const el = document.getElementById('gmail-status');
     if (d.authorized) {
       el.innerHTML = '<span class="pill pill-ok" style="font-size:14px">✅ Gmail API Authorized</span> <span style="color:var(--muted)">('+d.sender_email+')</span>';
-      document.getElementById('gmail-auth-btn').style.display = 'none';
+      document.getElementById('gmail-auth-btn').style.display = '';
     } else if (d.configured) {
-      el.innerHTML = '<span class="pill pill-off">⚠️ Not Authorized</span>';
+      el.innerHTML = '<span class="pill pill-off">⚠️ Not Configured — Click Authorize</span>';
       document.getElementById('gmail-auth-btn').style.display = '';
     } else {
-      el.innerHTML = '<span class="pill pill-err">❌ Not Configured</span> <span style="font-size:11px;color:var(--muted)">Set GOOGLE_CLIENT_ID + GMAIL_SENDER_EMAIL in .env</span>';
+      el.innerHTML = '<span class="pill pill-err">❌ Not Configured — Add keys below</span>';
       document.getElementById('gmail-auth-btn').style.display = 'none';
+    }
+    // Load current key values into form
+    if (document.getElementById('key-google-id')) {
+      fetch(API+'/api/config/keys').then(r=>r.json()).then(kd=>{
+        const googleKeys = kd['Google OAuth']||[];
+        googleKeys.forEach(k=>{
+          if (k.env_var==='GOOGLE_CLIENT_ID') document.getElementById('key-google-id').value = k.value_set ? '••••••••' : '';
+          if (k.env_var==='GOOGLE_CLIENT_SECRET') document.getElementById('key-google-secret').value = k.value_set ? '••••••••' : '';
+          if (k.env_var==='GMAIL_SENDER_EMAIL') document.getElementById('key-gmail-email').value = k.value_masked||'';
+          if (k.env_var==='GOOGLE_REDIRECT_URI') document.getElementById('key-redirect-uri').value = k.value_masked||'https://deus-v3-production.up.railway.app/api/gmail/callback';
+        });
+      });
     }
   });
 }
@@ -1626,23 +1705,78 @@ function startGmailAuth() {
   });
 }
 
-// ========== CAMPAIGN CALENDAR (Followup) ==========
-function loadCampaignCalendar(campaignId) {
-  fetch(API+'/api/campaigns/'+campaignId+'/calendar').then(r=>r.json()).then(d=>{
+function saveGoogleOAuthKeys() {
+  const id = document.getElementById('key-google-id').value;
+  const secret = document.getElementById('key-google-secret').value;
+  const email = document.getElementById('key-gmail-email').value;
+  const uri = document.getElementById('key-redirect-uri').value;
+  if (!id && !secret && !email) { log('gmail-log', 'No keys to save', 'warn'); return; }
+  log('gmail-log', 'Saving Google OAuth keys...', 'info');
+  const saves = [];
+  if (id && !id.startsWith('••')) saves.push(fetch(API+'/api/config/keys/GOOGLE_CLIENT_ID', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({value:id})}));
+  if (secret && !secret.startsWith('••')) saves.push(fetch(API+'/api/config/keys/GOOGLE_CLIENT_SECRET', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({value:secret})}));
+  if (email) saves.push(fetch(API+'/api/config/keys/GMAIL_SENDER_EMAIL', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({value:email})}));
+  if (uri) saves.push(fetch(API+'/api/config/keys/GOOGLE_REDIRECT_URI', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({value:uri})}));
+  Promise.all(saves).then(()=>{
+    log('gmail-log', 'Google OAuth keys saved! Now click "Authorize Gmail API".', 'ok');
+    checkGmailAuth();
+  }).catch(e=>log('gmail-log', 'Save failed: '+e, 'err'));
+}
+
+function loadGmailDailyStatus() {
+  fetch(API+'/api/send-limits/status').then(r=>r.json()).then(d=>{
+    const el = document.getElementById('out-gmail-status');
+    if (el) el.textContent = (d.gmail_daily_sent||0)+' / '+(d.gmail_daily_limit||2000);
+  }).catch(()=>{});
+}
+
+// ========== FOLLOWUP CALENDAR ==========
+function loadCalendar() {
+  fetch(API+'/api/followup/calendar').then(r=>r.json()).then(d=>{
     let html = '';
     (d||[]).forEach(e=>{
       html += '<tr><td>'+e.scheduled_date+'</td><td style="color:#5EEAFF">'+e.lead_source+'</td><td>'+(e.subject_template||'').substring(0,40)+'</td><td>'+(e.interval_days||1)+'d</td><td><span class="pill '+(e.active?'pill-ok':'pill-off')+'">'+(e.active?'Active':'Off')+'</span></td></tr>';
     });
-    document.getElementById('ccal-tbody').innerHTML = html || '<tr><td colspan="5" style="color:var(--muted)">No calendar entries</td></tr>';
+    document.getElementById('fu-tbody').innerHTML = html || '<tr><td colspan="5" style="color:var(--muted)">No calendar entries — add scheduled sends below</td></tr>';
   });
 }
 
-function addCampaignCalendar() {
-  const cid = document.getElementById('ccal-campaign').value;
-  const date = document.getElementById('ccal-date').value;
-  const source = document.getElementById('ccal-source').value;
-  const interval = document.getElementById('ccal-interval').value || 1;
-  const subject = document.getElementById('ccal-subject').value;
+function addCalendarEntry() {
+  const date = document.getElementById('fu-date').value;
+  const source = document.getElementById('fu-source').value;
+  const subject = document.getElementById('fu-subject').value;
+  const interval = document.getElementById('fu-interval').value || 1;
+  const templateText = document.getElementById('fu-template-text').value;
+  const templateHtml = document.getElementById('fu-template-html').value;
+
+  if (!date) { alert('Select a date'); return; }
+  const status = document.getElementById('fu-status');
+  status.innerHTML = '<span class="spinner"></span>';
+
+  fetch(API+'/api/followup/calendar', {
+    method: 'POST', headers: {'Content-Type':'application/json'},
+    body: JSON.stringify({
+      scheduled_date: date,
+      lead_source: source,
+      subject_template: subject,
+      interval_days: parseInt(interval),
+      template_text: templateText,
+      template_html: templateHtml,
+    })
+  }).then(r=>r.json()).then(d=>{
+    if (d.id) {
+      log('fu-log', 'Calendar entry added for '+date, 'ok');
+      loadCalendar();
+      document.getElementById('fu-date').value = '';
+      document.getElementById('fu-subject').value = '';
+      document.getElementById('fu-template-text').value = '';
+      document.getElementById('fu-template-html').value = '';
+    } else {
+      log('fu-log', 'Error: '+(d.detail||JSON.stringify(d)), 'err');
+    }
+    status.innerHTML = '';
+  }).catch(e=>{ status.innerHTML = ''; log('fu-log', 'Error: '+e, 'err'); });
+}
   const text = document.getElementById('ccal-template').value;
   const html = document.getElementById('ccal-template-html').value;
   if (!cid || !date) { log('ccal-log','Select campaign and date','err'); return; }

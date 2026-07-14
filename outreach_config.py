@@ -41,6 +41,7 @@ class StyleConfig:
     use_html_template: bool = False             # If True, sends HTML version
     call_to_action: str = "Would you be open to a short call this week?"
     ai_email_enabled: bool = True               # Use LLM to generate emails (vs template only)
+    email_method: str = "auto"                  # "gmail" | "smtp" | "auto"
 
 
 def load_style_config() -> StyleConfig:

@@ -35,6 +35,7 @@ from outreach_config import (
 )
 
 OUTREACH_LOG_FILE = "outreach_log.json"
+GMAIL_DAILY_CAP = 2000
 
 
 class OutreachAgent(BaseAgent):
@@ -79,6 +80,9 @@ class OutreachAgent(BaseAgent):
 
         self.smtp_profile = profile
         self.tracker = EmailTracker()
+        self.email_method = getattr(self.style, 'email_method', 'auto')
+        self._gmail_date = time.strftime("%Y-%m-%d")
+        self._gmail_daily_sent = 0
 
     def _get_email_sender(self):
         """Lazy-load email sender."""
@@ -107,6 +111,19 @@ class OutreachAgent(BaseAgent):
             from send_limiter import get_send_limiter
             self._send_limiter = get_send_limiter()
         return self._send_limiter
+
+    def _check_gmail_daily(self) -> bool:
+        """Check if Gmail daily cap is reached. Auto-resets on date change."""
+        today = time.strftime("%Y-%m-%d")
+        if self._gmail_date != today:
+            self._gmail_date = today
+            self._gmail_daily_sent = 0
+        return self._gmail_daily_sent < GMAIL_DAILY_CAP
+
+    def _record_gmail_send(self):
+        """Record a successful Gmail API send."""
+        self._check_gmail_daily()
+        self._gmail_daily_sent += 1
 
     def think(self, prompt: str) -> str:
         if not self.client:
@@ -180,7 +197,7 @@ class OutreachAgent(BaseAgent):
         except (KeyError, IndexError):
             return f"Quick proposal for {lead.get('business_name', 'your business')}"
 
-    def send_email(self, lead: dict, message: str, is_html: bool = False) -> bool:
+    def send_email(self, lead: dict, message: str, is_html: bool = False, lead_type: str = "imported") -> bool:
         """Send email via the unified email sender with all checks."""
         to_email = lead.get("business_email", "")
         if not to_email:
@@ -204,6 +221,24 @@ class OutreachAgent(BaseAgent):
                           to_email, spam_result["score"], spam_result["issues"])
             return False
 
+        # Determine sending method based on email_method and lead_type
+        method_to_use = "auto"
+        if self.email_method == "gmail":
+            method_to_use = "gmail_api"
+        elif self.email_method == "smtp":
+            method_to_use = "smtp"
+        elif self.email_method == "auto":
+            gmail_ok = self._check_gmail_daily()
+            if not gmail_ok:
+                if lead_type == "imported":
+                    logger.warning("Gmail daily cap reached (%d/%d) — skipping imported lead",
+                                  self._gmail_daily_sent, GMAIL_DAILY_CAP)
+                    return False
+                else:
+                    logger.info("Gmail daily cap reached (%d/%d) — using SMTP for scout lead",
+                               self._gmail_daily_sent, GMAIL_DAILY_CAP)
+                    method_to_use = "smtp"
+
         # Send via unified sender
         sender = self._get_email_sender()
         result = sender.send(
@@ -212,10 +247,13 @@ class OutreachAgent(BaseAgent):
             body=message,
             html=is_html,
             lead_name=lead.get("business_name", ""),
+            method=method_to_use,
         )
 
         if result["success"]:
             limiter.record_send(profile_name)
+            if result["method"] == "gmail_api":
+                self._record_gmail_send()
             logger.info("Email sent to %s via %s", to_email, result["method"])
             # Track delivery analytics
             try:
@@ -369,6 +407,12 @@ class OutreachAgent(BaseAgent):
             return make_result(False, "No valid leads found for the given IDs.",
                               stats={}, duration=time.time() - start)
 
+        # Gmail daily cap redirect — if cap already reached, switch to scout leads
+        if not self._check_gmail_daily() and self.email_method in ("auto",):
+            logger.warning("Gmail daily cap reached (%d/%d) — switching to scout leads",
+                          self._gmail_daily_sent, GMAIL_DAILY_CAP)
+            return self._send_auto_scout(kwargs, start)
+
         sent_count = 0
         failed_count = 0
         skipped_count = 0
@@ -382,16 +426,28 @@ class OutreachAgent(BaseAgent):
                 failed_count += 1
                 continue
 
+            # Dedup check
+            email = lead.get("business_email", "")
+            if email:
+                try:
+                    from app.database import is_email_already_contacted
+                    if is_email_already_contacted(email):
+                        logger.info("Dedup: skipping already contacted %s", email)
+                        skipped_count += 1
+                        continue
+                except Exception:
+                    pass
+
             # Rate limit check
             profile_name = self.smtp_profile.profile_name if self.smtp_profile else "default"
             check = limiter.can_send(profile_name)
             if not check["allowed"]:
                 logger.info("Rate limit reached, stopping send batch: %s", check["reason"])
-                skipped_count += len(leads) - (sent_count + failed_count)
+                skipped_count += len(leads) - (sent_count + failed_count + skipped_count)
                 break
 
             message, is_html = self.generate_outreach_message(lead)
-            sent = self.send_email(lead, message, is_html=is_html)
+            sent = self.send_email(lead, message, is_html=is_html, lead_type="imported")
             if sent:
                 sent_count += 1
                 log_entries.append({
@@ -426,7 +482,7 @@ class OutreachAgent(BaseAgent):
 
             self._append_outreach_log(log_entries)
 
-        summary = f"Sent: {sent_count} | Failed: {failed_count} | Skipped (rate limit): {skipped_count} | Total: {len(lead_ids)}"
+        summary = f"Sent: {sent_count} | Failed: {failed_count} | Skipped: {skipped_count} | Total: {len(lead_ids)}"
         stats = {
             "sent": sent_count,
             "failed": failed_count,
@@ -462,6 +518,7 @@ class OutreachAgent(BaseAgent):
 
         sent_count = 0
         failed_count = 0
+        skipped_count = 0
         limiter = self._get_send_limiter()
 
         for lead in scout_leads:
@@ -470,6 +527,18 @@ class OutreachAgent(BaseAgent):
                 failed_count += 1
                 continue
 
+            # Dedup check
+            email = lead.get("business_email", "")
+            if email:
+                try:
+                    from app.database import is_email_already_contacted
+                    if is_email_already_contacted(email):
+                        logger.info("Dedup: skipping already contacted %s", email)
+                        skipped_count += 1
+                        continue
+                except Exception:
+                    pass
+
             profile_name = self.smtp_profile.profile_name if self.smtp_profile else "default"
             check = limiter.can_send(profile_name)
             if not check["allowed"]:
@@ -477,7 +546,7 @@ class OutreachAgent(BaseAgent):
                 break
 
             message, is_html = self.generate_outreach_message(lead)
-            sent = self.send_email(lead, message, is_html=is_html)
+            sent = self.send_email(lead, message, is_html=is_html, lead_type="scraped")
             if sent:
                 sent_count += 1
                 try:
@@ -486,9 +555,9 @@ class OutreachAgent(BaseAgent):
                 except Exception:
                     pass
 
-        summary = f"Auto-scout sent: {sent_count} | Failed: {failed_count} | Scout leads processed: {len(scout_leads)}"
+        summary = f"Auto-scout sent: {sent_count} | Failed: {failed_count} | Skipped: {skipped_count} | Scout leads processed: {len(scout_leads)}"
         return make_result(True, summary,
-                          stats={"auto_sent": sent_count, "failed": failed_count, "total_scout": len(scout_leads)},
+                          stats={"auto_sent": sent_count, "failed": failed_count, "skipped": skipped_count, "total_scout": len(scout_leads)},
                           duration=time.time() - start)
 
     def _get_candidates_from_json(self, limit: int) -> list:
