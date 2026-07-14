@@ -143,6 +143,31 @@ tr:hover td{background:var(--panel2)}
         </div>
       </div>
       <div class="section">
+        <h3>🌍 Word Map — Geo Targeting</h3>
+        <div class="row">
+          <div class="field"><label>Country</label><input type="text" id="geo-country" placeholder="e.g. United States"></div>
+          <div class="field"><label>State(s) (comma-separated)</label><input type="text" id="geo-states" placeholder="e.g. California, Texas"></div>
+        </div>
+        <div class="row">
+          <div class="field"><label>Niche</label><input type="text" id="geo-niche" placeholder="e.g. HVAC companies"></div>
+          <div class="field" style="flex:.5"><label>Target</label><input type="number" id="geo-target" value="50"></div>
+          <div class="field" style="flex:.5"><label>Type</label><select id="geo-type"><option value="scout">Scout</option><option value="outreach">Outreach</option></select></div>
+        </div>
+        <div class="row">
+          <button class="btn-violet" onclick="runGeoScout()">🔍 Geo Scout</button>
+          <button onclick="addGeo()">+ Add Target</button>
+        </div>
+        <div class="tbl-wrap" style="margin-top:8px">
+          <table><thead><tr><th>Country</th><th>State</th><th>City</th><th>Type</th><th>Status</th><th></th></tr></thead><tbody id="geo-tbody"></tbody></table>
+        </div>
+      </div>
+      <div class="section" id="geo-results-section" style="display:none">
+        <h3>Geo Results</h3>
+        <div class="tbl-wrap">
+          <table><thead><tr><th>Business</th><th>Email</th><th>Phone</th><th>Source</th></tr></thead><tbody id="geo-results-tbody"></tbody></table>
+        </div>
+      </div>
+      <div class="section">
         <h3>Results <span id="scout-count" style="color:var(--muted);font-weight:400"></span></h3>
         <div class="tbl-wrap">
           <table><thead><tr>
@@ -156,10 +181,71 @@ tr:hover td{background:var(--panel2)}
     <!-- OUTREACH -->
     <div class="panel" id="panel-outreach">
       <div class="panel-title">Outreach Agent</div>
-      <div class="panel-desc">Preview leads first, then confirm to send emails. No emails sent without your approval.</div>
+      <div class="panel-desc">Preview leads first, then confirm to send emails. Auto-scout sends to scout leads only.</div>
       <div class="section">
-        <h3>Step 1: Preview Leads</h3>
+        <h3>📧 AI Email Writer</h3>
         <div class="row">
+          <label class="switch" style="display:flex;align-items:center;gap:8px;font-size:13px">
+            <input type="checkbox" id="out-ai-toggle" onchange="toggleAIWriter()" checked>
+            <span class="slider"></span> AI Email Writer: <span id="out-ai-status">ON</span>
+          </label>
+          <span style="font-size:11px;color:var(--muted)">When OFF, uses your custom template instead of AI generation</span>
+        </div>
+      </div>
+      <div class="section" id="out-template-section">
+        <h3>📝 Custom Template (Newsletter/Blogspot Style)</h3>
+        <div class="row">
+          <label style="display:flex;align-items:center;gap:8px;font-size:13px">
+            <input type="checkbox" id="out-html-mode" onchange="toggleHTMLMode()"> HTML Mode (Rich Text, Images)
+          </label>
+        </div>
+        <div class="row">
+          <div class="field" style="flex:1">
+            <label>Subject Template</label>
+            <input type="text" id="out-subject" value="Quick proposal for {business_name}" style="width:100%">
+          </div>
+        </div>
+        <div class="row">
+          <div class="field" style="flex:1">
+            <label>Plain Text Version</label>
+            <textarea id="out-template" rows="6" placeholder="Your template here...
+Available placeholders: {business_name}, {niche}, {owner_name}, {services_offered}, {website}
+No character limit." style="width:100%;font-family:Consolas,monospace;font-size:12px"></textarea>
+          </div>
+        </div>
+        <div class="row">
+          <div class="field" style="flex:1">
+            <label>HTML Version (Newsletter with images)</label>
+            <textarea id="out-template-html" rows="8" placeholder="<div style=&quot;font-family:Arial;max-width:600px;margin:auto&quot;>
+  <img src=&quot;https://example.com/logo.png&quot; alt=&quot;Logo&quot; style=&quot;max-width:100%&quot;>
+  <h2>Hi {business_name},</h2>
+  <p>Your message here...</p>
+  <p>Available placeholders: {business_name}, {niche}, {owner_name}</p>
+</div>" style="width:100%;font-family:Consolas,monospace;font-size:12px"></textarea>
+          </div>
+        </div>
+        <div class="row">
+          <div class="field" style="flex:1">
+            <label>Signature</label>
+            <input type="text" id="out-sig" value="Best regards,&#10;GrowthDesk VA Team" style="width:100%">
+          </div>
+        </div>
+        <div class="row">
+          <button onclick="saveOutreachConfig()">Save Template</button>
+          <span id="out-tmpl-status"></span>
+        </div>
+      </div>
+      <div class="section">
+        <h3>Lead Source</h3>
+        <div class="row">
+          <div class="field" style="flex:.5">
+            <label>Filter by</label>
+            <select id="out-lead-type" onchange="previewOutreach()">
+              <option value="">All Leads</option>
+              <option value="scraped">Scout Leads Only (Auto-Send)</option>
+              <option value="imported">Imported Leads Only (Manual)</option>
+            </select>
+          </div>
           <div class="field" style="flex:.5">
             <label>Channel</label>
             <select id="out-channel"><option>email</option><option>auto</option><option>linkedin</option><option>instagram</option><option>facebook</option><option>phone/sms</option></select>
@@ -168,20 +254,25 @@ tr:hover td{background:var(--panel2)}
             <label>Batch Limit</label>
             <input type="number" id="out-limit" value="25" min="1" max="500">
           </div>
+        </div>
+        <div class="row">
           <button onclick="previewOutreach()" id="out-preview-btn">Preview Leads</button>
           <button onclick="sendConfirmed()" id="out-send-btn" style="display:none;background:var(--green);color:#0A0F1C;border:none">Send to Selected</button>
+          <button onclick="runAutoScout()" id="out-auto-btn" class="btn-violet">🤖 Auto-Scout Send</button>
           <span id="out-selected-count" style="color:var(--cyan);font-size:12px;align-self:center"></span>
+          <span id="out-auto-status" style="color:var(--muted);font-size:12px;align-self:center"></span>
         </div>
       </div>
       <div class="section" id="out-preview-section" style="display:none">
         <h3>Step 2: Review & Confirm <span id="out-preview-count" style="color:var(--muted);font-weight:400"></span></h3>
         <div class="row" style="margin-bottom:8px">
           <label style="font-size:12px;color:var(--cyan);cursor:pointer"><input type="checkbox" id="out-select-all" onchange="toggleSelectAll()"> Select All</label>
+          <span style="font-size:11px;color:var(--muted)">Showing <span id="out-lead-type-label">all</span> leads</span>
         </div>
         <div class="tbl-wrap" style="max-height:400px">
           <table><thead><tr>
             <th style="width:30px"><input type="checkbox" id="out-check-all" onchange="toggleSelectAll()"></th>
-            <th>Business</th><th>Email</th><th>Channel</th><th>Status</th>
+            <th>Business</th><th>Email</th><th>Type</th><th>Channel</th><th>Status</th>
           </tr></thead><tbody id="out-preview-tbody"></tbody></table>
         </div>
       </div>
@@ -336,12 +427,24 @@ tr:hover td{background:var(--panel2)}
       <div class="panel-title">API Keys</div>
       <div class="panel-desc">Manage API keys for all agents. Keys are saved to .env.</div>
       <div class="section" id="apikey-list"></div>
+      <div class="section">
+        <h3>📧 Gmail API (OAuth2) — For sending emails on Railway</h3>
+        <div id="gmail-status">Checking...</div>
+        <div class="row" style="margin-top:8px">
+          <button id="gmail-auth-btn" onclick="startGmailAuth()" style="display:none" class="btn-green">🔑 Authorize Gmail API</button>
+        </div>
+        <div style="font-size:11px;color:var(--muted);margin-top:6px">
+          Setup: Set GOOGLE_CLIENT_ID + GOOGLE_CLIENT_SECRET + GMAIL_SENDER_EMAIL in .env.
+          Then click Authorize and sign in with your Gmail account.
+        </div>
+      </div>
+      <div class="section"><h3>Activity Log</h3><div class="log" id="gmail-log"></div></div>
     </div>
 
     <!-- ANALYTICS -->
     <div class="panel" id="panel-analytics">
-      <div class="panel-title">Email Analytics</div>
-      <div class="panel-desc">Track email delivery, opens, clicks, and engagement across all campaigns.</div>
+      <div class="panel-title">📊 Professional Analytics</div>
+      <div class="panel-desc">Inbox placement, spam reasons, bounce analysis, delivery trends — all in one place.</div>
       <div class="section">
         <h3>Overview</h3>
         <div class="row">
@@ -355,6 +458,25 @@ tr:hover td{background:var(--panel2)}
           <div class="stat-chip" style="flex:1;text-align:center"><div style="font-size:22px;font-weight:700;color:#FFB86C" id="ana-failed">0</div><div style="font-size:11px;color:#7D93B8">Failed</div></div>
           <div class="stat-chip" style="flex:1;text-align:center"><div style="font-size:22px;font-weight:700;color:#A6E3A1" id="ana-delivered">0</div><div style="font-size:11px;color:#7D93B8">Delivered</div></div>
         </div>
+      </div>
+      <div class="section">
+        <h3>📬 Inbox Placement Rate</h3>
+        <div class="row">
+          <div class="stat-chip" style="flex:1;text-align:center"><div style="font-size:26px;font-weight:700;color:#A6E3A1" id="ana-inbox">0</div><div style="font-size:11px;color:#7D93B8">Inbox (<span id="ana-inbox-pct">0%</span>)</div></div>
+          <div class="stat-chip" style="flex:1;text-align:center"><div style="font-size:26px;font-weight:700;color:#FF6B81" id="ana-spam">0</div><div style="font-size:11px;color:#7D93B8">Spam (<span id="ana-spam-pct">0%</span>)</div></div>
+          <div class="stat-chip" style="flex:1;text-align:center"><div style="font-size:26px;font-weight:700;color:#7D93B8" id="ana-total-checked">0</div><div style="font-size:11px;color:#7D93B8">Total Checked</div></div>
+        </div>
+        <div id="ana-delivery-chart" style="margin-top:8px;min-height:80px"></div>
+      </div>
+      <div class="section">
+        <h3>🔍 Spam Reason Comparison</h3>
+        <div class="tbl-wrap">
+          <table><thead><tr><th>Reason</th><th>Count</th><th>% of Spam</th></tr></thead><tbody id="ana-spam-reasons-tbody"></tbody></table>
+        </div>
+      </div>
+      <div class="section">
+        <h3>📈 Daily Trends (Last 14 Days)</h3>
+        <div id="ana-daily-chart" style="min-height:60px">Loading...</div>
       </div>
       <div class="section">
         <h3>Recent Emails</h3>
@@ -688,12 +810,13 @@ function previewOutreach() {
   clearLog('out-log');
   const limit = document.getElementById('out-limit').value || 25;
   const channel = document.getElementById('out-channel').value;
-  log('out-log', 'Previewing leads (limit: '+limit+', channel: '+channel+')...', 'info');
+  const leadType = document.getElementById('out-lead-type').value;
+  log('out-log', 'Previewing leads (limit: '+limit+', channel: '+channel+', type: '+(leadType||'all')+')...', 'info');
   setBtn('out-preview-btn', true);
 
   fetch(API+'/api/outreach/preview', {
     method:'POST', headers:{'Content-Type':'application/json'},
-    body: JSON.stringify({limit: parseInt(limit), channel: channel})
+    body: JSON.stringify({limit: parseInt(limit), channel: channel, lead_type: leadType||null})
   }).then(r=>r.json()).then(d=>{
     setBtn('out-preview-btn', false);
     if (!d.success || !d.candidates || d.candidates.length === 0) {
@@ -716,16 +839,21 @@ function renderPreviewTable() {
     const checked = outSelectedIds.has(lead.id) ? 'checked' : '';
     const statusColor = lead.has_email ? '#A6E3A1' : '#FFB86C';
     const statusText = lead.has_email ? 'Ready' : 'No email';
+    const typeLabel = lead.lead_type === 'scraped' ? '<span class="pill pill-ok">Scout</span>' :
+                      lead.lead_type === 'imported' ? '<span class="pill pill-off">Imported</span>' :
+                      '<span class="pill pill-run">'+lead.lead_type+'</span>';
     html += '<tr>';
     html += '<td><input type="checkbox" '+checked+' onchange="toggleLead('+(lead.id)+', this.checked)"></td>';
     html += '<td>'+(lead.business_name||'Unknown')+'</td>';
     html += '<td style="color:#7D93B8">'+(lead.business_email||'-')+'</td>';
+    html += '<td>'+typeLabel+'</td>';
     html += '<td style="color:#5EEAFF">'+(lead.channel||'-')+'</td>';
     html += '<td><span style="color:'+statusColor+'">'+statusText+'</span></td>';
     html += '</tr>';
   });
   document.getElementById('out-preview-tbody').innerHTML = html;
   document.getElementById('out-preview-count').textContent = '('+outPreviewData.length+' leads)';
+  document.getElementById('out-lead-type-label').textContent = document.getElementById('out-lead-type').selectedOptions[0].text;
 }
 
 function toggleLead(id, checked) {
@@ -805,19 +933,70 @@ fetch(API+'/api/outreach/config').then(r=>r.json()).then(d=>{
 });
 
 function saveOutreachConfig() {
+  const ai = document.getElementById('out-ai-toggle').checked;
+  const html = document.getElementById('out-html-mode').checked;
   fetch(API+'/api/outreach/config', {
     method:'POST', headers:{'Content-Type':'application/json'},
     body: JSON.stringify({
-      tone: document.getElementById('out-tone').value,
-      max_words: parseInt(document.getElementById('out-words').value)||150,
+      tone: document.getElementById('out-tone')?.value||'professional',
+      max_words: 9999999,
       subject_template: document.getElementById('out-subject').value,
-      call_to_action: document.getElementById('out-cta').value,
-      signature: document.getElementById('out-sig').value,
-      use_custom_template: document.getElementById('out-use-tmpl').checked,
-      custom_template: document.getElementById('out-tmpl').value,
+      call_to_action: document.getElementById('out-cta')?.value||'',
+      signature: document.getElementById('out-sig')?.value||'',
+      use_custom_template: !ai,
+      custom_template: document.getElementById('out-template').value,
+      custom_template_html: document.getElementById('out-template-html').value,
+      use_html_template: html,
+      ai_email_enabled: ai,
     })
-  }).then(r=>r.json()).then(d=>{ log('out-log', 'Email style saved.', 'ok'); });
+  }).then(r=>r.json()).then(d=>{
+    document.getElementById('out-tmpl-status').innerHTML='<span class="pill pill-ok">Saved</span>';
+    setTimeout(()=>document.getElementById('out-tmpl-status').innerHTML='', 2000);
+  });
 }
+
+function toggleAIWriter() {
+  const on = document.getElementById('out-ai-toggle').checked;
+  document.getElementById('out-ai-status').textContent = on ? 'ON' : 'OFF';
+}
+
+function toggleHTMLMode() {
+  const html = document.getElementById('out-html-mode').checked;
+  document.getElementById('out-template').disabled = html;
+  document.getElementById('out-template-html').disabled = !html;
+}
+
+function runAutoScout() {
+  const btn = document.getElementById('out-auto-btn');
+  const status = document.getElementById('out-auto-status');
+  btn.disabled = true; btn.innerHTML='<span class="spinner"></span> Sending...';
+  status.textContent = 'Auto-scout sending to scout leads only...';
+  fetch(API+'/api/outreach/auto-scout', {
+    method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({limit: parseInt(document.getElementById('out-limit').value)||10})
+  }).then(r=>r.json()).then(d=>{
+    btn.disabled = false; btn.innerHTML='🤖 Auto-Scout Send';
+    status.textContent = d.message||'Done';
+    log('out-log', d.message||'Auto-scout complete', d.success?'ok':'err');
+  }).catch(e=>{ btn.disabled=false; btn.innerHTML='🤖 Auto-Scout Send'; status.textContent='Error'; });
+}
+
+// Load outreach config with new fields
+function loadOutreachConfig() {
+  fetch(API+'/api/outreach/config').then(r=>r.json()).then(d=>{
+    if (d.ai_email_enabled !== undefined) {
+      document.getElementById('out-ai-toggle').checked = d.ai_email_enabled;
+      document.getElementById('out-ai-status').textContent = d.ai_email_enabled ? 'ON' : 'OFF';
+    }
+    document.getElementById('out-subject').value = d.subject_template||'';
+    document.getElementById('out-template').value = d.custom_template||'';
+    document.getElementById('out-template-html').value = d.custom_template_html||'';
+    document.getElementById('out-html-mode').checked = d.use_html_template||false;
+    document.getElementById('out-sig').value = d.signature||'';
+    toggleHTMLMode();
+  });
+}
+loadOutreachConfig();
 
 // SMTP
 function loadSMTP() {
@@ -1362,10 +1541,197 @@ function checkSpam() {
   });
 }
 
+// ========== GEOGRAPHY / WORD MAP ==========
+function loadGeo() {
+  fetch(API+'/api/geo/targets').then(r=>r.json()).then(d=>{
+    let html = '';
+    (d||[]).forEach(g=>{
+      html += '<tr><td>'+g.country+'</td><td>'+(g.state||'-')+'</td><td>'+(g.city||'-')+'</td><td style="color:#5EEAFF">'+g.target_type+'</td><td><span class="pill '+(g.enabled?'pill-ok':'pill-off')+'">'+(g.enabled?'Active':'Off')+'</span></td>';
+      html += '<td><button class="btn-red" onclick="deleteGeo('+g.id+')" style="padding:2px 6px;font-size:10px">X</button></td></tr>';
+    });
+    document.getElementById('geo-tbody').innerHTML = html || '<tr><td colspan="6" style="color:var(--muted)">No targets — add countries/states below</td></tr>';
+  });
+}
+
+function addGeo() {
+  const country = document.getElementById('geo-country').value.trim();
+  const state = document.getElementById('geo-state').value.trim();
+  const type = document.getElementById('geo-type').value;
+  if (!country) { log('geo-log','Enter a country','err'); return; }
+  fetch(API+'/api/geo/targets', {
+    method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({country:country, state:state, target_type:type})
+  }).then(r=>r.json()).then(d=>{
+    log('geo-log','Added: '+country+(state?', '+state:''), 'ok');
+    loadGeo();
+    document.getElementById('geo-country').value='';
+    document.getElementById('geo-state').value='';
+  });
+}
+
+function deleteGeo(id) {
+  fetch(API+'/api/geo/targets/'+id, {method:'DELETE'}).then(()=>{ loadGeo(); });
+}
+
+// Scout with geo targeting
+function runGeoScout() {
+  const niche = document.getElementById('geo-niche').value.trim();
+  const country = document.getElementById('geo-country').value.trim();
+  const states = document.getElementById('geo-states').value.split(',').map(s=>s.trim()).filter(Boolean);
+  if (!niche) { log('geo-log','Enter a niche','err'); return; }
+  log('geo-log','Searching for "'+niche+'" in '+(country||'anywhere')+'...', 'info');
+  fetch(API+'/api/lead-scout/search-geo', {
+    method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({niche:niche, country:country, states:states, target:parseInt(document.getElementById('geo-target').value)||50})
+  }).then(r=>r.json()).then(d=>{
+    log('geo-log','Found '+d.total+' leads in '+d.location+'. Saved: '+d.saved, d.success?'ok':'err');
+    if (d.leads) renderGeoResults(d.leads);
+  });
+}
+
+function renderGeoResults(leads) {
+  let html = '';
+  leads.forEach(l=>{
+    html += '<tr><td>'+(l.business_name||'')+'</td><td style="color:#7D93B8">'+(l.business_email||'')+'</td><td>'+(l.phone||'')+'</td><td style="color:#5EEAFF">'+(l.source||'')+'</td></tr>';
+  });
+  document.getElementById('geo-results-tbody').innerHTML = html || '<tr><td colspan="4" style="color:var(--muted)">No results</td></tr>';
+  document.getElementById('geo-results-section').style.display = '';
+}
+
+// ========== GOOGLE OAUTH (Gmail API) ==========
+function checkGmailAuth() {
+  fetch(API+'/api/gmail/status').then(r=>r.json()).then(d=>{
+    const el = document.getElementById('gmail-status');
+    if (d.authorized) {
+      el.innerHTML = '<span class="pill pill-ok" style="font-size:14px">✅ Gmail API Authorized</span> <span style="color:var(--muted)">('+d.sender_email+')</span>';
+      document.getElementById('gmail-auth-btn').style.display = 'none';
+    } else if (d.configured) {
+      el.innerHTML = '<span class="pill pill-off">⚠️ Not Authorized</span>';
+      document.getElementById('gmail-auth-btn').style.display = '';
+    } else {
+      el.innerHTML = '<span class="pill pill-err">❌ Not Configured</span> <span style="font-size:11px;color:var(--muted)">Set GOOGLE_CLIENT_ID + GMAIL_SENDER_EMAIL in .env</span>';
+      document.getElementById('gmail-auth-btn').style.display = 'none';
+    }
+  });
+}
+
+function startGmailAuth() {
+  fetch(API+'/api/gmail/auth-url').then(r=>r.json()).then(d=>{
+    if (d.available && d.auth_url) {
+      window.open(d.auth_url, '_blank', 'width=600,height=700');
+      log('gmail-log', 'OAuth window opened. Complete authorization and come back.', 'info');
+    } else {
+      log('gmail-log', d.error||'Cannot start auth', 'err');
+    }
+  });
+}
+
+// ========== CAMPAIGN CALENDAR (Followup) ==========
+function loadCampaignCalendar(campaignId) {
+  fetch(API+'/api/campaigns/'+campaignId+'/calendar').then(r=>r.json()).then(d=>{
+    let html = '';
+    (d||[]).forEach(e=>{
+      html += '<tr><td>'+e.scheduled_date+'</td><td style="color:#5EEAFF">'+e.lead_source+'</td><td>'+(e.subject_template||'').substring(0,40)+'</td><td>'+(e.interval_days||1)+'d</td><td><span class="pill '+(e.active?'pill-ok':'pill-off')+'">'+(e.active?'Active':'Off')+'</span></td></tr>';
+    });
+    document.getElementById('ccal-tbody').innerHTML = html || '<tr><td colspan="5" style="color:var(--muted)">No calendar entries</td></tr>';
+  });
+}
+
+function addCampaignCalendar() {
+  const cid = document.getElementById('ccal-campaign').value;
+  const date = document.getElementById('ccal-date').value;
+  const source = document.getElementById('ccal-source').value;
+  const interval = document.getElementById('ccal-interval').value || 1;
+  const subject = document.getElementById('ccal-subject').value;
+  const text = document.getElementById('ccal-template').value;
+  const html = document.getElementById('ccal-template-html').value;
+  if (!cid || !date) { log('ccal-log','Select campaign and date','err'); return; }
+  fetch(API+'/api/campaigns/'+cid+'/calendar', {
+    method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({campaign_id:parseInt(cid), scheduled_date:date, lead_source:source,
+      interval_days:parseInt(interval), subject_template:subject, template_text:text, template_html:html})
+  }).then(r=>r.json()).then(d=>{
+    log('ccal-log','Calendar entry added for '+date, 'ok');
+    loadCampaignCalendar(cid);
+  });
+}
+
+// ========== ADVANCED ANALYTICS ==========
+function loadAdvancedAnalytics() {
+  // Inbox vs Spam
+  fetch(API+'/api/analytics/delivery').then(r=>r.json()).then(d=>{
+    document.getElementById('ana-total-checked').textContent = d.total_checked||0;
+    document.getElementById('ana-inbox').textContent = d.inbox||0;
+    document.getElementById('ana-inbox-pct').textContent = (d.inbox_pct||0)+'%';
+    document.getElementById('ana-spam').textContent = d.spam||0;
+    document.getElementById('ana-spam-pct').textContent = (d.spam_pct||0)+'%';
+    // Spam reasons chart (as table)
+    let html = '';
+    (d.spam_reasons||[]).forEach(r=>{
+      const pct = d.total_checked > 0 ? (r.count / d.total_checked * 100).toFixed(1) : 0;
+      html += '<tr><td style="color:#FF6B81">'+r.reason+'</td><td>'+r.count+'</td><td>'+pct+'%</td></tr>';
+    });
+    document.getElementById('ana-spam-reasons-tbody').innerHTML = html || '<tr><td colspan="3" style="color:var(--muted)">No spam data yet</td></tr>';
+    // Bar chart representation
+    drawDeliveryBar(d);
+  });
+  // Daily trends
+  fetch(API+'/api/analytics/daily?days=14').then(r=>r.json()).then(d=>{
+    drawDailyChart(d);
+  });
+}
+
+function drawDeliveryBar(d) {
+  const maxVal = Math.max(d.inbox||0, d.spam||0, 1);
+  const inboxW = ((d.inbox||0) / maxVal * 100).toFixed(0);
+  const spamW = ((d.spam||0) / maxVal * 100).toFixed(0);
+  document.getElementById('ana-delivery-chart').innerHTML = `
+    <div style="margin-bottom:6px"><span style="color:#A6E3A1">■ Inbox</span> <span style="color:#5EEAFF">${d.inbox||0}</span> (${d.inbox_pct||0}%)</div>
+    <div style="background:var(--bg);border-radius:4px;height:20px;overflow:hidden;margin-bottom:10px">
+      <div style="background:#A6E3A1;width:${inboxW}%;height:100%;float:left;transition:width 0.5s"></div>
+      <div style="background:#FF6B81;width:${spamW}%;height:100%;float:left;transition:width 0.5s"></div>
+    </div>
+    <div style="margin-bottom:6px"><span style="color:#FF6B81">■ Spam</span> <span style="color:#5EEAFF">${d.spam||0}</span> (${d.spam_pct||0}%)</div>
+    <div style="border-left:2px solid var(--border);padding-left:10px;margin-top:10px">
+      <div style="font-size:11px;color:var(--muted);margin-bottom:4px">Top Spam Reasons:</div>
+    </div>
+  `;
+}
+
+function drawDailyChart(dailyData) {
+  // Simple text chart showing daily trends
+  if (!dailyData || dailyData.length === 0) {
+    document.getElementById('ana-daily-chart').innerHTML = '<div style="color:var(--muted);font-size:12px">No daily data yet</div>';
+    return;
+  }
+  // Group by date
+  const byDate = {};
+  dailyData.forEach(r => {
+    if (!byDate[r.date]) byDate[r.date] = {};
+    byDate[r.date][r.metric] = (byDate[r.date][r.metric]||0) + (r.value||0);
+  });
+  let html = '<div style="font-size:11px;max-height:200px;overflow-y:auto">';
+  Object.keys(byDate).sort().slice(-14).forEach(date => {
+    const day = byDate[date];
+    html += '<div style="display:flex;gap:10px;padding:3px 0;border-bottom:1px solid #243252">';
+    html += '<span style="color:#7D93B8;min-width:80px">'+date+'</span>';
+    html += '<span style="color:#A6E3A1">Inbox:'+(day['inbox']||0)+'</span>';
+    html += '<span style="color:#FF6B81">Spam:'+(day['spam']||0)+'</span>';
+    html += '<span style="color:#5EEAFF">Sent:'+(day['sent']||0)+'</span>';
+    html += '<span style="color:#FFB86C">Bounce:'+(day['bounced']||0)+'</span>';
+    html += '</div>';
+  });
+  html += '</div>';
+  document.getElementById('ana-daily-chart').innerHTML = html;
+}
+
 // ========== INIT ==========
 checkAuth();
 loadDaemon();
 loadDeliverability();
+loadGeo();
+checkGmailAuth();
+loadAdvancedAnalytics();
 </script>
 </body>
 </html>

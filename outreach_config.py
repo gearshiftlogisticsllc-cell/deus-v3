@@ -32,11 +32,13 @@ SMTP_PROFILES_FILE = "smtp_profiles.json"
 @dataclass
 class StyleConfig:
     tone: str = "professional"                 # professional | friendly | direct | formal
-    max_words: int = 120
+    max_words: int = 9999999                   # effectively unlimited
     subject_template: str = "Quick proposal for {business_name}"
     signature: str = ""                         # appended to every message
     custom_template: str = ""                   # if set, used INSTEAD of LLM generation
+    custom_template_html: str = ""              # HTML version (newsletter/blog-style, with images)
     use_custom_template: bool = False
+    use_html_template: bool = False             # If True, sends HTML version
     call_to_action: str = "Would you be open to a short call this week?"
     ai_email_enabled: bool = True               # Use LLM to generate emails (vs template only)
 
@@ -58,21 +60,29 @@ def save_style_config(config: StyleConfig) -> None:
         json.dump(asdict(config), f, indent=2)
 
 
-def render_custom_template(template: str, lead: dict, signature: str) -> str:
+def render_custom_template(template: str, lead: dict, signature: str, is_html: bool = False) -> str:
     """Fill {placeholders} in a user-provided template with lead fields."""
+    placeholders = {
+        "business_name": lead.get("business_name", "there"),
+        "niche": lead.get("niche", "your industry"),
+        "services_offered": lead.get("services_offered", ""),
+        "address": lead.get("address", ""),
+        "website": lead.get("website", ""),
+        "owner_name": lead.get("owner_name", ""),
+        "phone": lead.get("phone", ""),
+        "business_email": lead.get("business_email", ""),
+    }
     try:
-        body = template.format(
-            business_name=lead.get("business_name", "there"),
-            niche=lead.get("niche", "your industry"),
-            services_offered=lead.get("services_offered", ""),
-            address=lead.get("address", ""),
-            website=lead.get("website", ""),
-        )
+        body = template.format(**placeholders)
     except (KeyError, IndexError) as e:
         logger.warning("Template placeholder error (%s) — using template as-is.", e)
         body = template
     if signature:
-        body = f"{body}\n\n{signature}"
+        if is_html:
+            sig_html = signature.replace("\n", "<br>")
+            body = f'{body}<br><br>{sig_html}'
+        else:
+            body = f"{body}\n\n{signature}"
     return body
 
 

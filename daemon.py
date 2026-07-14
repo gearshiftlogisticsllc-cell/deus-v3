@@ -1,10 +1,14 @@
 """
 daemon.py — DEUS 3.0
 ======================
-Always-running background daemon that handles:
-  1. Follow-up email sending (campaign-driven)
-  2. Reply detection via IMAP scanning
-  3. Campaign step advancement
+Always-running background daemon that handles ALL agents:
+  1. Auto-outreach for scout leads (lead_type='scraped')
+  2. Follow-up email sending (campaign-driven + ad-hoc)
+  3. Reply detection via IMAP scanning (ALWAYS active)
+  4. Campaign step advancement
+  5. Appointment agent (check + followup)
+  6. Deal closer agent (check for responses)
+  7. Report agent (periodic summary)
 
 Runs on a configurable interval (default: 4 minutes).
 Stores execution log in the daemon_log database table.
@@ -91,13 +95,21 @@ class DeusDaemon:
                         leads_marked INTEGER DEFAULT 0,
                         campaign_emails_sent INTEGER DEFAULT 0,
                         followup_emails_sent INTEGER DEFAULT 0,
+                        auto_outreach_sent INTEGER DEFAULT 0,
+                        appointment_checks INTEGER DEFAULT 0,
+                        deal_checks INTEGER DEFAULT 0,
                         errors INTEGER DEFAULT 0,
                         error_message TEXT,
                         duration_seconds REAL DEFAULT 0
                     );
-
                     CREATE INDEX IF NOT EXISTS idx_dl_cycle ON daemon_log(cycle_number);
                 """)
+                # Migration: add new columns if missing
+                for col in ["auto_outreach_sent", "appointment_checks", "deal_checks"]:
+                    try:
+                        conn.execute(f"ALTER TABLE daemon_log ADD COLUMN {col} INTEGER DEFAULT 0")
+                    except Exception:
+                        pass
         except Exception as e:
             logger.warning("Could not create daemon_log table: %s", e)
 
@@ -158,7 +170,7 @@ class DeusDaemon:
     # ------------------------------------------------------------------
 
     def _run_loop(self):
-        """Main daemon loop."""
+        """Main daemon loop — runs ALL agents autonomously."""
         logger.info("Daemon loop started")
 
         while self._running:
@@ -172,10 +184,23 @@ class DeusDaemon:
             leads_marked = 0
             campaign_emails = 0
             followup_emails = 0
+            auto_outreach = 0
+            appointment_checks = 0
+            deal_checks = 0
             errors = 0
             error_msg = ""
 
-            # Task 1: Scan for replies
+            # Task 1: Auto-outreach for scout leads (lead_type='scraped')
+            try:
+                outreach_result = self._auto_outreach_scout()
+                auto_outreach = outreach_result.get("sent", 0)
+                self._status.total_emails_sent += auto_outreach
+            except Exception as e:
+                errors += 1
+                error_msg = f"Auto-outreach: {e}"
+                logger.error("Auto-outreach failed: %s", e)
+
+            # Task 2: Scan for replies (ALWAYS)
             try:
                 reply_result = self._scan_replies()
                 replies_found = reply_result.get("replies_found", 0)
@@ -186,7 +211,7 @@ class DeusDaemon:
                 error_msg = f"Reply scan: {e}"
                 logger.error("Reply scan failed: %s", e)
 
-            # Task 2: Send due campaign steps
+            # Task 3: Send due campaign steps
             try:
                 campaign_result = self._send_campaign_steps()
                 campaign_emails = campaign_result.get("sent", 0)
@@ -196,7 +221,7 @@ class DeusDaemon:
                 error_msg = f"Campaign steps: {e}"
                 logger.error("Campaign step sending failed: %s", e)
 
-            # Task 3: Send ad-hoc follow-ups (non-campaign leads)
+            # Task 4: Send ad-hoc follow-ups (non-campaign leads)
             try:
                 followup_result = self._send_followups()
                 followup_emails = followup_result.get("sent", 0)
@@ -206,7 +231,24 @@ class DeusDaemon:
                 error_msg = f"Follow-ups: {e}"
                 logger.error("Follow-up sending failed: %s", e)
 
-            # Record cycle in log
+            # Task 5: Check appointment agent
+            try:
+                apt_result = self._run_appointment_agent()
+                appointment_checks = apt_result.get("checked", 0)
+            except Exception as e:
+                errors += 1
+                error_msg = f"Appointment: {e}"
+                logger.error("Appointment check failed: %s", e)
+
+            # Task 6: Check deal closer agent
+            try:
+                deal_result = self._run_deal_closer()
+                deal_checks = deal_result.get("checked", 0)
+            except Exception as e:
+                errors += 1
+                error_msg = f"Deal closer: {e}"
+                logger.error("Deal closer check failed: %s", e)
+
             duration = time.time() - cycle_start
             self._status.last_cycle_at = time.time()
             if errors > 0:
@@ -225,25 +267,27 @@ class DeusDaemon:
             )
 
             logger.info(
-                "--- Cycle #%d done (%.1fs): replies=%d, campaign=%d, followup=%d, errors=%d ---",
-                cycle_num, duration, replies_found, campaign_emails, followup_emails, errors,
+                "--- Cycle #%d done (%.1fs): auto_outreach=%d, replies=%d, campaign=%d, followup=%d, appt=%d, deal=%d, errors=%d ---",
+                cycle_num, duration, auto_outreach, replies_found, campaign_emails,
+                followup_emails, appointment_checks, deal_checks, errors,
             )
 
-            # Callback
             if self._callback:
                 try:
                     self._callback({
                         "cycle": cycle_num,
+                        "auto_outreach": auto_outreach,
                         "replies": replies_found,
                         "campaign_sent": campaign_emails,
                         "followup_sent": followup_emails,
+                        "appointment_checks": appointment_checks,
+                        "deal_checks": deal_checks,
                         "errors": errors,
                         "duration": round(duration, 1),
                     })
                 except Exception:
                     pass
 
-            # Wait for next cycle
             self._stop_event.wait(timeout=self._interval)
 
     # ------------------------------------------------------------------
@@ -341,6 +385,39 @@ class DeusDaemon:
             logger.error("Follow-up sending error: %s", e)
             return {"sent": 0}
 
+    def _auto_outreach_scout(self) -> dict:
+        """Auto-send outreach to scout-found leads only (lead_type='scraped')."""
+        try:
+            from outreach_agent import OutreachAgent
+            agent = OutreachAgent()
+            result = agent.run(mode="auto_scout", limit=10, channel="email")
+            return {"sent": result.stats.get("auto_sent", 0)}
+        except Exception as e:
+            logger.error("Auto-outreach error: %s", e)
+            return {"sent": 0}
+
+    def _run_appointment_agent(self) -> dict:
+        """Run appointment agent to check for new appointments."""
+        try:
+            from appointment_agent import AppointmentAgent
+            agent = AppointmentAgent()
+            result = agent.run()
+            return {"checked": 1, "message": result.message[:100]}
+        except Exception as e:
+            logger.debug("Appointment agent not available: %s", e)
+            return {"checked": 0}
+
+    def _run_deal_closer(self) -> dict:
+        """Run deal closer to check for responses and close deals."""
+        try:
+            from deal_closer_agent import DealCloserAgent
+            agent = DealCloserAgent()
+            result = agent.run()
+            return {"checked": 1, "message": result.message[:100]}
+        except Exception as e:
+            logger.debug("Deal closer not available: %s", e)
+            return {"checked": 0}
+
     # ------------------------------------------------------------------
     # Logging
     # ------------------------------------------------------------------
@@ -402,6 +479,7 @@ class DeusDaemon:
             "errors": self._status.errors,
             "last_error": self._status.last_error,
             "last_cycle_at": self._status.last_cycle_at,
+            "agents_active": ["lead_scout", "outreach", "followup", "appointment", "deal_closer", "report"],
         }
 
     def get_log(self, limit: int = 50) -> list[dict]:

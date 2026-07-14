@@ -8,12 +8,19 @@ as no_response.
 Campaign-aware: skips leads that are enrolled in an active campaign
 (those are handled by daemon.py + campaign.py).
 
+Now also handles campaign calendar entries: sends scheduled follow-ups
+based on calendar dates with custom templates.
+
 Integrates with deliverability infrastructure:
   - email_sender: Unified sending
   - spam_checker: Content anti-spam scoring
   - send_limiter: Rate limiting
 
-Reads/Writes: leads (database), email_log
+Reply detection is ALWAYS active — no manual marking needed.
+
+Lead source filter: can target scout leads only, imported leads only, or all.
+
+Reads/Writes: leads (database), email_log, campaign_calendar
 """
 
 import os
@@ -37,7 +44,7 @@ MAX_FOLLOWUPS = 3
 class FollowupAgent(BaseAgent):
     name = "FollowupAgent"
     display_name = "Followup"
-    description = "Re-engages contacted leads after 48h cooldown, max 3 attempts. Skips campaign-enrolled leads."
+    description = "Re-engages contacted leads after 48h cooldown, max 3 attempts. Skips campaign-enrolled leads. Sends calendar-scheduled campaign messages."
     requires_keys = ["GROQ_API_KEY"]
 
     def __init__(self):
@@ -87,48 +94,68 @@ class FollowupAgent(BaseAgent):
 
     def run(self, **kwargs) -> AgentResult:
         start = time.time()
+        lead_source = kwargs.get("lead_source", "all")  # 'all', 'scraped', 'imported'
 
-        # Step 1: Scan for replies first (if IMAP configured)
+        # Step 1: ALWAYS scan for replies first (no manual marking needed)
         reply_scan = {"replies_found": 0, "leads_marked": 0}
         try:
             reply_scan = scan_for_replies(days_back=7)
+            if reply_scan.get("replies_found", 0) > 0:
+                logger.info("Reply scan: %d replies found, %d leads marked",
+                           reply_scan["replies_found"], reply_scan.get("leads_marked", 0))
         except Exception as e:
             logger.warning("Reply scan failed (continuing anyway): %s", e)
 
-        # Step 2: Get leads from database (not JSON)
+        # Step 2: Process campaign calendar entries (scheduled followups)
+        calendar_sent = self._process_campaign_calendar(lead_source)
+
+        # Step 3: Get leads from database
         try:
             from app.database import get_leads
             all_leads = get_leads(status="contacted", limit=500)
+            # Filter by lead_source
+            if lead_source == "scraped":
+                all_leads = [l for l in all_leads if l.get("lead_type") == "scraped"]
+            elif lead_source == "imported":
+                all_leads = [l for l in all_leads if l.get("lead_type") == "imported"]
         except Exception:
             all_leads = self._load_leads_from_json()
 
-        # Step 3: Filter out leads enrolled in active campaigns
+        # Step 4: Filter out leads enrolled in active campaigns
         campaign_leads = set()
         try:
             from campaign import get_campaign_manager
             cm = get_campaign_manager()
             due = cm.get_due_enrollments()
-            # Campaign daemon handles these
             for d in due:
                 campaign_leads.add(d.get("lead_id"))
         except Exception:
             pass
 
-        # Step 4: Find leads that need follow-up (not in campaigns)
+        # Step 5: Find leads that need follow-up (not in campaigns)
         leads_to_followup = []
         for lead in all_leads:
             if lead.get("id") in campaign_leads:
-                continue  # Skip — campaign handles this lead
+                continue
             if self.tracker.should_followup(lead):
                 leads_to_followup.append(lead)
 
-        if not leads_to_followup:
+        # Step 6: Determine if reply was detected for each lead (always active)
+        auto_marked = 0
+        for lead in all_leads:
+            try:
+                if self.tracker._has_replied(lead):
+                    auto_marked += 1
+            except Exception:
+                pass
+
+        if not leads_to_followup and calendar_sent == 0:
             return make_result(True,
-                f"No leads due for follow-up. (Replies detected: {reply_scan.get('replies_found', 0)}, "
-                f"Campaign-enrolled: {len(campaign_leads)})",
-                stats={"followed_up": 0, "rejected": 0,
+                f"No leads due for follow-up. (Calendar sent: {calendar_sent}, Replies: {reply_scan.get('replies_found', 0)}, "
+                f"Auto-marked: {auto_marked}, Campaign-enrolled: {len(campaign_leads)})",
+                stats={"followed_up": 0, "calendar_sent": calendar_sent,
                        "replies_detected": reply_scan.get("replies_found", 0),
-                       "leads_marked_replied": reply_scan.get("leads_marked", 0),
+                       "auto_marked_replied": auto_marked,
                        "campaign_enrolled": len(campaign_leads)},
                 duration=time.time() - start)
 
@@ -142,7 +169,6 @@ class FollowupAgent(BaseAgent):
                 rejected += 1
                 continue
 
-            # Rate limit check
             check = limiter.can_send()
             if not check["allowed"]:
                 logger.info("Rate limit hit, stopping follow-ups: %s", check["reason"])
@@ -151,7 +177,6 @@ class FollowupAgent(BaseAgent):
             followup_message = self.generate_followup_message(lead)
             sent = self.send_followup_message(lead, followup_message)
 
-            # Update lead in database
             try:
                 from app.database import update_lead
                 update_lead(lead.get("id", 0), {
@@ -165,17 +190,100 @@ class FollowupAgent(BaseAgent):
                 followed_up += 1
 
         duration = time.time() - start
-        summary = (f"Followups sent: {followed_up} | Rejected (max reached): {rejected} | "
+        summary = (f"Followups sent: {followed_up} | Calendar sent: {calendar_sent} | "
+                   f"Rejected (max reached): {rejected} | "
                    f"Replies detected: {reply_scan.get('replies_found', 0)} | "
-                   f"Leads marked replied: {reply_scan.get('leads_marked', 0)} | "
+                   f"Auto-marked replied: {auto_marked} | "
                    f"Campaign-enrolled (skipped): {len(campaign_leads)}")
         logger.info(summary)
         return make_result(True, summary,
-                          stats={"followed_up": followed_up, "rejected": rejected,
+                          stats={"followed_up": followed_up, "calendar_sent": calendar_sent,
+                                 "rejected": rejected,
                                  "replies_detected": reply_scan.get("replies_found", 0),
-                                 "leads_marked_replied": reply_scan.get("leads_marked", 0),
+                                 "auto_marked_replied": auto_marked,
                                  "campaign_enrolled": len(campaign_leads)},
                           duration=duration)
+
+    def _process_campaign_calendar(self, lead_source: str) -> int:
+        """Process campaign calendar entries that are due. Returns count sent."""
+        try:
+            from app.database import db_conn
+            from datetime import datetime
+            today = datetime.now().strftime("%Y-%m-%d")
+            sent = 0
+
+            with db_conn() as conn:
+                # Get calendar entries due today
+                entries = conn.execute(
+                    """SELECT cc.*, c.name as campaign_name, c.id as cid
+                       FROM campaign_calendar cc
+                       JOIN campaigns c ON cc.campaign_id = c.id
+                       WHERE cc.scheduled_date <= ? AND cc.active = 1""",
+                    (today,),
+                ).fetchall()
+
+                for entry in entries:
+                    entry = dict(entry)
+                    # Get leads for this campaign based on lead_source
+                    if entry["lead_source"] == "all" or lead_source == "all":
+                        leads_query = "SELECT * FROM leads WHERE business_email IS NOT NULL AND business_email != ''"
+                        if lead_source == "scraped":
+                            leads_query += " AND lead_type = 'scraped'"
+                        elif lead_source == "imported":
+                            leads_query += " AND lead_type = 'imported'"
+                        leads = conn.execute(leads_query).fetchall()
+                    elif entry["lead_source"] == "scraped":
+                        leads = conn.execute(
+                            "SELECT * FROM leads WHERE lead_type = 'scraped' AND business_email IS NOT NULL AND business_email != ''"
+                        ).fetchall()
+                    elif entry["lead_source"] == "imported":
+                        leads = conn.execute(
+                            "SELECT * FROM leads WHERE lead_type = 'imported' AND business_email IS NOT NULL AND business_email != ''"
+                        ).fetchall()
+                    else:
+                        leads = []
+
+                    template_text = entry["template_text"] or entry["template_html"] or ""
+                    template_html = entry["template_html"] or ""
+                    subject_template = entry["subject_template"] or "Follow-up from {campaign_name}"
+                    is_html = bool(template_html)
+
+                    sender = self._get_email_sender()
+                    for lead in leads:
+                        lead = dict(lead)
+                        email = lead.get("business_email", "")
+                        if not email:
+                            continue
+
+                        body = template_text
+                        if is_html:
+                            body = template_html.format(
+                                business_name=lead.get("business_name", "there"),
+                                campaign_name=entry.get("campaign_name", ""),
+                                niche=lead.get("niche", ""),
+                            )
+                        else:
+                            body = body.format(
+                                business_name=lead.get("business_name", "there"),
+                                campaign_name=entry.get("campaign_name", ""),
+                                niche=lead.get("niche", ""),
+                            )
+
+                        subject = subject_template.format(
+                            business_name=lead.get("business_name", ""),
+                        )
+
+                        result = sender.send(
+                            to=email, subject=subject, body=body,
+                            html=is_html, lead_name=lead.get("business_name", ""),
+                        )
+                        if result["success"]:
+                            sent += 1
+
+                return sent
+        except Exception as e:
+            logger.warning("Campaign calendar processing error: %s", e)
+            return 0
 
     def _load_leads_from_json(self) -> list:
         """Fallback: load leads from JSON file."""

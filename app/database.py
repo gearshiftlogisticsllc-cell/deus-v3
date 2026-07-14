@@ -272,6 +272,55 @@ def init_db():
             CREATE INDEX IF NOT EXISTS idx_ce_status ON campaign_enrollments(status);
             CREATE INDEX IF NOT EXISTS idx_sr_schedule ON schedule_runs(schedule_id);
             CREATE INDEX IF NOT EXISTS idx_dl_cycle ON daemon_log(cycle_number);
+
+            -- Geography / Word Map
+            CREATE TABLE IF NOT EXISTS geo_targets (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                country TEXT NOT NULL,
+                state TEXT NOT NULL DEFAULT '',
+                city TEXT NOT NULL DEFAULT '',
+                target_type TEXT DEFAULT 'scout',
+                enabled INTEGER DEFAULT 1,
+                created_at REAL DEFAULT (strftime('%s','now'))
+            );
+            CREATE INDEX IF NOT EXISTS idx_geo_country ON geo_targets(country);
+
+            -- Campaign calendar entries (followup campaign)
+            CREATE TABLE IF NOT EXISTS campaign_calendar (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                campaign_id INTEGER NOT NULL,
+                scheduled_date TEXT NOT NULL,
+                lead_source TEXT DEFAULT 'all',
+                template_html TEXT DEFAULT '',
+                template_text TEXT DEFAULT '',
+                subject_template TEXT DEFAULT '',
+                interval_days INTEGER DEFAULT 1,
+                active INTEGER DEFAULT 1,
+                created_at REAL DEFAULT (strftime('%s','now')),
+                FOREIGN KEY (campaign_id) REFERENCES campaigns(id)
+            );
+
+            -- Analytics detail: inbox placement tracking
+            CREATE TABLE IF NOT EXISTS analytics_delivery (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                email_log_id INTEGER,
+                inbox_status TEXT DEFAULT 'unknown',
+                spam_reason TEXT,
+                bounce_type TEXT,
+                domain TEXT,
+                checked_at REAL DEFAULT (strftime('%s','now')),
+                FOREIGN KEY (email_log_id) REFERENCES email_log(id)
+            );
+
+            -- Analytics: aggregated daily stats
+            CREATE TABLE IF NOT EXISTS analytics_daily (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                date TEXT NOT NULL,
+                metric TEXT NOT NULL,
+                value REAL DEFAULT 0,
+                dimension TEXT DEFAULT '',
+                UNIQUE(date, metric, dimension)
+            );
         """)
 
         # Seed default users if not present
@@ -650,16 +699,19 @@ def delete_lead(lead_id: int):
         conn.execute("DELETE FROM leads WHERE id = ?", (lead_id,))
 
 
-def get_outreach_candidates(limit: int = 25) -> list[dict]:
-    """Get leads ready for outreach: has email, not yet contacted."""
+def get_outreach_candidates(limit: int = 25, lead_type: str = None) -> list[dict]:
+    """Get leads ready for outreach: has email, not yet contacted. Optional lead_type filter."""
     with db_conn() as conn:
-        rows = conn.execute(
-            """SELECT * FROM leads
-               WHERE business_email IS NOT NULL AND business_email != ''
-               AND status != 'contacted'
-               ORDER BY score DESC, id ASC LIMIT ?""",
-            (limit,),
-        ).fetchall()
+        query = """SELECT * FROM leads
+                   WHERE business_email IS NOT NULL AND business_email != ''
+                   AND status != 'contacted'"""
+        params = []
+        if lead_type:
+            query += " AND lead_type = ?"
+            params.append(lead_type)
+        query += " ORDER BY score DESC, id ASC LIMIT ?"
+        params.append(limit)
+        rows = conn.execute(query, params).fetchall()
         return [_row_to_dict(r) for r in rows]
 
 

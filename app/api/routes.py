@@ -288,15 +288,18 @@ def get_outreach_config():
             "signature": s.signature,
             "use_custom_template": s.use_custom_template,
             "custom_template": s.custom_template,
+            "custom_template_html": s.custom_template_html,
+            "use_html_template": s.use_html_template,
             "ai_email_enabled": s.ai_email_enabled,
         }
     except Exception:
         return {
-            "tone": "professional", "max_words": 150,
+            "tone": "professional", "max_words": 9999999,
             "subject_template": "Quick question about your business, {business_name}",
             "call_to_action": "Would you be open to a quick 15-minute call this week?",
             "signature": "Best regards,\nGrowthDesk VA Team",
             "use_custom_template": False, "custom_template": "",
+            "custom_template_html": "", "use_html_template": False,
             "ai_email_enabled": True,
         }
 
@@ -307,12 +310,14 @@ def save_outreach_config(cfg: dict):
         from outreach_config import StyleConfig, save_style_config
         save_style_config(StyleConfig(
             tone=cfg.get("tone", "professional"),
-            max_words=int(cfg.get("max_words", 150)),
+            max_words=int(cfg.get("max_words", 9999999)),
             subject_template=cfg.get("subject_template", ""),
             call_to_action=cfg.get("call_to_action", ""),
             signature=cfg.get("signature", ""),
             use_custom_template=cfg.get("use_custom_template", False),
             custom_template=cfg.get("custom_template", ""),
+            custom_template_html=cfg.get("custom_template_html", ""),
+            use_html_template=cfg.get("use_html_template", False),
             ai_email_enabled=cfg.get("ai_email_enabled", True),
         ))
         return {"saved": True}
@@ -641,15 +646,17 @@ def lead_status_summary():
 
 @router.post("/api/outreach/preview")
 def outreach_preview(request: dict):
-    """Preview leads ready for outreach. Returns candidates for user to review."""
+    """Preview leads ready for outreach. Supports lead_type filter."""
     limit = int(request.get("limit", 25))
     channel = request.get("channel", "email")
+    lead_type = request.get("lead_type", None)
     try:
         from app.database import get_outreach_candidates
         candidates = get_outreach_candidates(limit=limit)
+        if lead_type:
+            candidates = [c for c in candidates if c.get("lead_type") == lead_type]
     except Exception:
         candidates = []
-    # Resolve channels
     for c in candidates:
         resolved = channel
         if channel == "auto":
@@ -661,6 +668,23 @@ def outreach_preview(request: dict):
                 resolved = "none"
         c["channel"] = resolved
     return {"success": True, "candidates": candidates, "count": len(candidates)}
+
+
+@router.post("/api/outreach/auto-scout")
+def outreach_auto_scout(request: dict):
+    """Auto-send to scout-found leads only (lead_type='scraped'). No imported leads touched."""
+    limit = int(request.get("limit", 10))
+    try:
+        from outreach_agent import OutreachAgent
+        agent = OutreachAgent()
+        result = agent.run(mode="auto_scout", limit=limit, channel="email")
+        return {
+            "success": result.success,
+            "message": result.message,
+            "stats": result.stats,
+        }
+    except Exception as e:
+        return {"success": False, "error": str(e)}
 
 
 _send_jobs = {}
@@ -1032,3 +1056,394 @@ def check_spam(request: dict):
         )
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+
+# ---------------------------------------------------------------------------
+# Geography / Word Map
+# ---------------------------------------------------------------------------
+
+@router.get("/api/geo/targets")
+def list_geo_targets():
+    try:
+        from app.database import db_conn
+        with db_conn() as conn:
+            rows = conn.execute("SELECT * FROM geo_targets ORDER BY country, state").fetchall()
+            return [dict(r) for r in rows]
+    except Exception:
+        return []
+
+
+@router.post("/api/geo/targets")
+def add_geo_target(request: dict):
+    try:
+        from app.database import db_conn
+        with db_conn() as conn:
+            cur = conn.execute(
+                "INSERT INTO geo_targets (country, state, city, target_type) VALUES (?, ?, ?, ?)",
+                (
+                    request.get("country", "United States"),
+                    request.get("state", ""),
+                    request.get("city", ""),
+                    request.get("target_type", "scout"),
+                ),
+            )
+            return {"id": cur.lastrowid}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.delete("/api/geo/targets/{target_id}")
+def delete_geo_target(target_id: int):
+    try:
+        from app.database import db_conn
+        with db_conn() as conn:
+            conn.execute("DELETE FROM geo_targets WHERE id = ?", (target_id,))
+            return {"deleted": True}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ---------------------------------------------------------------------------
+# Campaign Calendar (Followup Campaigns)
+# ---------------------------------------------------------------------------
+
+@router.post("/api/campaigns/{campaign_id}/calendar")
+def add_campaign_calendar(campaign_id: int, request: dict):
+    try:
+        from app.database import db_conn
+        with db_conn() as conn:
+            cur = conn.execute(
+                """INSERT INTO campaign_calendar
+                   (campaign_id, scheduled_date, lead_source, template_html,
+                    template_text, subject_template, interval_days)
+                   VALUES (?, ?, ?, ?, ?, ?, ?)""",
+                (
+                    campaign_id,
+                    request.get("scheduled_date", ""),
+                    request.get("lead_source", "all"),
+                    request.get("template_html", ""),
+                    request.get("template_text", ""),
+                    request.get("subject_template", ""),
+                    int(request.get("interval_days", 1)),
+                ),
+            )
+            return {"id": cur.lastrowid}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/api/campaigns/{campaign_id}/calendar")
+def get_campaign_calendar(campaign_id: int):
+    try:
+        from app.database import db_conn
+        with db_conn() as conn:
+            rows = conn.execute(
+                "SELECT * FROM campaign_calendar WHERE campaign_id = ? ORDER BY scheduled_date",
+                (campaign_id,),
+            ).fetchall()
+            return [dict(r) for r in rows]
+    except Exception:
+        return []
+
+
+@router.get("/api/campaigns/{campaign_id}/calendar/due")
+def due_calendar_entries(campaign_id: int):
+    """Get calendar entries whose scheduled_date is today or past."""
+    try:
+        from datetime import datetime
+        from app.database import db_conn
+        today = datetime.now().strftime("%Y-%m-%d")
+        with db_conn() as conn:
+            rows = conn.execute(
+                """SELECT cc.*, c.name as campaign_name
+                   FROM campaign_calendar cc
+                   JOIN campaigns c ON cc.campaign_id = c.id
+                   WHERE cc.campaign_id = ? AND cc.scheduled_date <= ?
+                   AND cc.active = 1
+                   ORDER BY cc.scheduled_date""",
+                (campaign_id, today),
+            ).fetchall()
+            return [dict(r) for r in rows]
+    except Exception:
+        return []
+
+
+# ---------------------------------------------------------------------------
+# Google OAuth2 (Gmail API)
+# ---------------------------------------------------------------------------
+
+@router.get("/api/gmail/auth-url")
+def gmail_auth_url():
+    """Get the Google OAuth URL for Gmail API authorization."""
+    try:
+        from google_auth_oauthlib.flow import Flow
+        import json
+        client_config = {
+            "web": {
+                "client_id": os.getenv("GOOGLE_CLIENT_ID", ""),
+                "client_secret": os.getenv("GOOGLE_CLIENT_SECRET", ""),
+                "auth_uri": "https://accounts.google.com/o/oauth2/auth",
+                "token_uri": "https://oauth2.googleapis.com/token",
+                "redirect_uris": [os.getenv("GOOGLE_REDIRECT_URI", "http://localhost:8000/api/gmail/callback")],
+            }
+        }
+        if not client_config["web"]["client_id"]:
+            return {"available": False, "error": "GOOGLE_CLIENT_ID not set in .env"}
+        flow = Flow.from_client_config(
+            client_config,
+            scopes=["https://www.googleapis.com/auth/gmail.send"],
+        )
+        flow.redirect_uri = os.getenv("GOOGLE_REDIRECT_URI", "http://localhost:8000/api/gmail/callback")
+        auth_url, _ = flow.authorization_url(
+            access_type="offline",
+            include_granted_scopes="true",
+            prompt="consent",
+        )
+        return {"available": True, "auth_url": auth_url}
+    except ImportError:
+        return {"available": False, "error": "google-auth-oauthlib not installed"}
+    except Exception as e:
+        return {"available": False, "error": str(e)}
+
+
+@router.get("/api/gmail/callback")
+def gmail_callback(code: str = None, error: str = None):
+    """Handle Google OAuth2 callback — saves token.json."""
+    if error:
+        return {"success": False, "error": error}
+    if not code:
+        return {"success": False, "error": "No authorization code"}
+    try:
+        from google_auth_oauthlib.flow import Flow
+        import json
+        client_config = {
+            "web": {
+                "client_id": os.getenv("GOOGLE_CLIENT_ID", ""),
+                "client_secret": os.getenv("GOOGLE_CLIENT_SECRET", ""),
+                "auth_uri": "https://accounts.google.com/o/oauth2/auth",
+                "token_uri": "https://oauth2.googleapis.com/token",
+                "redirect_uris": [os.getenv("GOOGLE_REDIRECT_URI", "http://localhost:8000/api/gmail/callback")],
+            }
+        }
+        flow = Flow.from_client_config(
+            client_config,
+            scopes=["https://www.googleapis.com/auth/gmail.send"],
+        )
+        flow.redirect_uri = os.getenv("GOOGLE_REDIRECT_URI", "http://localhost:8000/api/gmail/callback")
+        flow.fetch_token(code=code)
+        creds = flow.credentials
+        # Save token
+        token_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "token.json")
+        with open(token_path, "w") as f:
+            f.write(creds.to_json())
+        return {
+            "success": True,
+            "message": "Gmail API authorized! Token saved. You can now send emails via Gmail API.",
+            "email": creds._id_token.get("email", "") if hasattr(creds, "_id_token") else "",
+        }
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+
+
+@router.get("/api/gmail/status")
+def gmail_status():
+    """Check if Gmail API is configured and authorized."""
+    token_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "token.json")
+    has_token = os.path.exists(token_path)
+    has_client_id = bool(os.getenv("GOOGLE_CLIENT_ID", ""))
+    sender_email = os.getenv("GMAIL_SENDER_EMAIL", "")
+    return {
+        "configured": has_client_id and bool(sender_email),
+        "has_token": has_token,
+        "sender_email": sender_email,
+        "authorized": has_token and has_client_id,
+    }
+
+
+# ---------------------------------------------------------------------------
+# Advanced Analytics
+# ---------------------------------------------------------------------------
+
+@router.get("/api/analytics/delivery")
+def delivery_analytics():
+    """Get inbox vs spam placement stats."""
+    try:
+        from app.database import db_conn
+        with db_conn() as conn:
+            inbox = conn.execute(
+                "SELECT COUNT(*) as c FROM analytics_delivery WHERE inbox_status = 'inbox'"
+            ).fetchone()["c"]
+            spam = conn.execute(
+                "SELECT COUNT(*) as c FROM analytics_delivery WHERE inbox_status = 'spam'"
+            ).fetchone()["c"]
+            unknown = conn.execute(
+                "SELECT COUNT(*) as c FROM analytics_delivery WHERE inbox_status = 'unknown'"
+            ).fetchone()["c"]
+            total = inbox + spam + unknown
+            reasons = conn.execute(
+                """SELECT spam_reason, COUNT(*) as c FROM analytics_delivery
+                   WHERE spam_reason IS NOT NULL AND spam_reason != ''
+                   GROUP BY spam_reason ORDER BY c DESC LIMIT 20"""
+            ).fetchall()
+            return {
+                "total_checked": total,
+                "inbox": inbox,
+                "inbox_pct": round(inbox / max(total, 1) * 100, 1),
+                "spam": spam,
+                "spam_pct": round(spam / max(total, 1) * 100, 1),
+                "unknown": unknown,
+                "spam_reasons": [{"reason": r["spam_reason"], "count": r["c"]} for r in reasons],
+            }
+    except Exception:
+        return {"total_checked": 0, "inbox": 0, "spam": 0, "unknown": 0, "spam_reasons": []}
+
+
+@router.get("/api/analytics/daily")
+def daily_analytics(days: int = 30):
+    """Get daily analytics for the last N days."""
+    try:
+        from datetime import datetime, timedelta
+        from app.database import db_conn
+        start_date = (datetime.now() - timedelta(days=days)).strftime("%Y-%m-%d")
+        with db_conn() as conn:
+            rows = conn.execute(
+                """SELECT date, metric, SUM(value) as value, dimension
+                   FROM analytics_daily
+                   WHERE date >= ?
+                   GROUP BY date, metric, dimension
+                   ORDER BY date ASC""",
+                (start_date,),
+            ).fetchall()
+            return [dict(r) for r in rows]
+    except Exception:
+        return []
+
+
+@router.post("/api/analytics/track-delivery")
+def track_email_delivery(request: dict):
+    """Record inbox/spam placement for an email."""
+    try:
+        from app.database import db_conn
+        with db_conn() as conn:
+            conn.execute(
+                """INSERT INTO analytics_delivery
+                   (email_log_id, inbox_status, spam_reason, bounce_type, domain)
+                   VALUES (?, ?, ?, ?, ?)""",
+                (
+                    request.get("email_log_id"),
+                    request.get("inbox_status", "unknown"),
+                    request.get("spam_reason", ""),
+                    request.get("bounce_type", ""),
+                    request.get("domain", ""),
+                ),
+            )
+            return {"recorded": True}
+    except Exception as e:
+        return {"error": str(e)}
+
+
+# ---------------------------------------------------------------------------
+# Lead Scout with Geography
+# ---------------------------------------------------------------------------
+
+@router.post("/api/lead-scout/search-geo")
+def lead_scout_search_geo(request: dict):
+    """Search leads with geography targeting."""
+    niche = request.get("niche", "").strip()
+    country = request.get("country", "")
+    states = request.get("states", [])
+    target = int(request.get("target", 50))
+    use_serper = request.get("use_serper", False)
+
+    if not niche:
+        raise HTTPException(status_code=400, detail="niche is required")
+
+    # Build location query
+    location_parts = []
+    if states:
+        location_parts.extend(states)
+    if country:
+        location_parts.append(country)
+    location_query = ", ".join(location_parts) if location_parts else ""
+
+    try:
+        from lead_scout_agent import LeadScoutAgent, LLM, SerperSource, DuckDuckGoSource, DirectWebSource
+        serper_key = os.getenv("SERPER_API_KEY", "")
+        serper = SerperSource(serper_key) if (use_serper and serper_key) else None
+        ddg = DuckDuckGoSource()
+        direct = DirectWebSource()
+        sources = []
+        if ddg.enabled: sources.append(ddg)
+        if direct.enabled: sources.append(direct)
+        if serper and serper.enabled: sources.append(serper)
+
+        llm = LLM()
+        agent = LeadScoutAgent(None, serper, llm)
+
+        # Niche + location for better targeting
+        search_query = niche
+        if location_query:
+            search_query = f"{niche} in {location_query}"
+
+        leads = agent.run(search_query, target=target)
+
+        # Save with lead_type = 'scraped' and location info
+        saved = 0
+        for lead in leads:
+            lead["lead_type"] = "scraped"
+            lead["source"] = "geo_scout"
+            if location_query:
+                lead["address"] = lead.get("address", "") or location_query
+            try:
+                from app.database import upsert_lead
+                upsert_lead(lead)
+                saved += 1
+            except Exception:
+                pass
+
+        return {
+            "success": True,
+            "leads": leads,
+            "total": len(leads),
+            "saved": saved,
+            "location": location_query or "anywhere",
+        }
+    except Exception as e:
+        return {"success": False, "error": str(e), "leads": []}
+
+
+# ---------------------------------------------------------------------------
+# Leads — differentiated listing
+# ---------------------------------------------------------------------------
+
+@router.get("/api/leads/by-type")
+def leads_by_type():
+    """Get lead counts grouped by lead_type."""
+    try:
+        from app.database import db_conn
+        with db_conn() as conn:
+            rows = conn.execute(
+                "SELECT lead_type, COUNT(*) as count FROM leads GROUP BY lead_type"
+            ).fetchall()
+            return [dict(r) for r in rows]
+    except Exception:
+        return []
+
+
+@router.get("/api/leads/scout-ready")
+def scout_leads_ready(limit: int = 100):
+    """Get scout-found leads (lead_type='scraped') ready for auto-outreach."""
+    try:
+        from app.database import db_conn
+        with db_conn() as conn:
+            rows = conn.execute(
+                """SELECT * FROM leads
+                   WHERE lead_type = 'scraped'
+                   AND business_email IS NOT NULL AND business_email != ''
+                   AND status != 'contacted'
+                   ORDER BY score DESC LIMIT ?""",
+                (limit,),
+            ).fetchall()
+            return [dict(r) for r in rows]
+    except Exception:
+        return []

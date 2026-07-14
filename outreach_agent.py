@@ -122,13 +122,16 @@ class OutreachAgent(BaseAgent):
             logger.error("Groq request failed: %s", e)
             return ""
 
-    def generate_outreach_message(self, lead: dict) -> str:
+    def generate_outreach_message(self, lead: dict) -> (str, bool):
+        """Returns (message_body, is_html) tuple."""
         # If AI emails disabled or custom template set, use template
         if not self.style.ai_email_enabled or (self.style.use_custom_template and self.style.custom_template):
             if self.style.use_custom_template and self.style.custom_template:
-                return render_custom_template(self.style.custom_template, lead, self.style.signature)
-            # Fallback template when AI is off
-            return self._fallback_template(lead)
+                is_html = self.style.use_html_template and bool(self.style.custom_template_html)
+                template = self.style.custom_template_html if is_html else self.style.custom_template
+                body = render_custom_template(template, lead, self.style.signature, is_html=is_html)
+                return body, is_html
+            return self._fallback_template(lead), False
 
         niche = lead.get("niche", "their industry")
         business_name = lead.get("business_name", "there")
@@ -141,20 +144,20 @@ class OutreachAgent(BaseAgent):
             f"The goal is to introduce a business proposal and request a "
             f"brief appointment/call to discuss it — specifically: "
             f"\"{self.style.call_to_action}\" "
-            f"Keep it under {self.style.max_words} words. "
+            f"No word limit. "
             f"Sign off generically without inventing a sender name. "
             f"Do not include a subject line, just the email body."
         )
         message = self.think(task)
         if not message:
-            message = self._fallback_template(lead)
+            message, _ = self._fallback_template(lead)
 
         if self.style.signature:
             message = f"{message}\n\n{self.style.signature}"
 
-        return message
+        return message, False
 
-    def _fallback_template(self, lead: dict) -> str:
+    def _fallback_template(self, lead: dict) -> (str, bool):
         """Generate a fallback template when AI is disabled or fails."""
         business_name = lead.get("business_name", "there")
         niche = lead.get("niche", "your industry")
@@ -166,7 +169,7 @@ class OutreachAgent(BaseAgent):
         )
         if self.style.signature:
             message = f"{message}\n\n{self.style.signature}"
-        return message
+        return message, False
 
     def render_subject(self, lead: dict) -> str:
         try:
@@ -177,7 +180,7 @@ class OutreachAgent(BaseAgent):
         except (KeyError, IndexError):
             return f"Quick proposal for {lead.get('business_name', 'your business')}"
 
-    def send_email(self, lead: dict, message: str) -> bool:
+    def send_email(self, lead: dict, message: str, is_html: bool = False) -> bool:
         """Send email via the unified email sender with all checks."""
         to_email = lead.get("business_email", "")
         if not to_email:
@@ -207,12 +210,24 @@ class OutreachAgent(BaseAgent):
             to=to_email,
             subject=subject,
             body=message,
+            html=is_html,
             lead_name=lead.get("business_name", ""),
         )
 
         if result["success"]:
             limiter.record_send(profile_name)
             logger.info("Email sent to %s via %s", to_email, result["method"])
+            # Track delivery analytics
+            try:
+                from app.database import db_conn
+                with db_conn() as conn:
+                    conn.execute(
+                        """INSERT INTO analytics_delivery (email_log_id, inbox_status, domain)
+                           VALUES (?, 'unknown', ?)""",
+                        (0, to_email.split("@")[-1] if "@" in to_email else ""),
+                    )
+            except Exception:
+                pass
             return True
 
         logger.warning("Email failed to %s: %s", to_email, result["message"])
@@ -269,6 +284,7 @@ class OutreachAgent(BaseAgent):
         mode = kwargs.get("mode", "preview")
         channel = kwargs.get("channel", "auto")
         limit = int(kwargs.get("limit", 25))
+        lead_type_filter = kwargs.get("lead_type", None)  # 'scraped', 'imported', or None for all
 
         if channel not in ("auto", *self.AVAILABLE_CHANNELS):
             channel = "auto"
@@ -276,9 +292,12 @@ class OutreachAgent(BaseAgent):
         if mode == "send":
             return self._send_confirmed(kwargs, start)
 
-        return self._preview(kwargs, start)
+        if mode == "auto_scout":
+            return self._send_auto_scout(kwargs, start)
 
-    def _preview(self, kwargs: dict, start: float) -> AgentResult:
+        return self._preview(kwargs, start, lead_type_filter=lead_type_filter)
+
+    def _preview(self, kwargs: dict, start: float, lead_type_filter: str = None) -> AgentResult:
         """Preview leads ready for outreach. Returns list for user to confirm."""
         limit = int(kwargs.get("limit", 25))
         channel = kwargs.get("channel", "auto")
@@ -286,6 +305,9 @@ class OutreachAgent(BaseAgent):
         try:
             from app.database import get_outreach_candidates
             candidates = get_outreach_candidates(limit=limit)
+            # Filter by lead_type if specified
+            if lead_type_filter:
+                candidates = [c for c in candidates if c.get("lead_type") == lead_type_filter]
         except Exception:
             candidates = self._get_candidates_from_json(limit)
 
@@ -297,7 +319,6 @@ class OutreachAgent(BaseAgent):
         for lead in candidates:
             resolved = self.resolve_channel(lead, lead.get("preferred_channel") or channel)
 
-            # Pre-check email deliverability
             deliverability = {}
             if resolved == "email" and lead.get("business_email"):
                 verifier = self._get_email_verifier()
@@ -316,10 +337,10 @@ class OutreachAgent(BaseAgent):
                 "niche": lead.get("niche", ""),
                 "channel": resolved or "none",
                 "has_email": bool(lead.get("business_email")),
+                "lead_type": lead.get("lead_type", "unknown"),
                 **deliverability,
             })
 
-        # Get rate limit status
         limiter = self._get_send_limiter()
         rate_status = limiter.get_status(self.smtp_profile.profile_name if self.smtp_profile else "default")
 
@@ -369,8 +390,8 @@ class OutreachAgent(BaseAgent):
                 skipped_count += len(leads) - (sent_count + failed_count)
                 break
 
-            message = self.generate_outreach_message(lead)
-            sent = self.send_email(lead, message)
+            message, is_html = self.generate_outreach_message(lead)
+            sent = self.send_email(lead, message, is_html=is_html)
             if sent:
                 sent_count += 1
                 log_entries.append({
@@ -381,6 +402,7 @@ class OutreachAgent(BaseAgent):
                     "sent": True,
                     "message": message[:200],
                     "smtp_profile": self.smtp_profile.profile_name if self.smtp_profile else None,
+                    "lead_type": lead.get("lead_type", "unknown"),
                 })
             else:
                 failed_count += 1
@@ -413,6 +435,61 @@ class OutreachAgent(BaseAgent):
             "rate_status": limiter.get_status(profile_name),
         }
         return make_result(True, summary, stats=stats, duration=time.time() - start)
+
+    def _send_auto_scout(self, kwargs: dict, start: float) -> AgentResult:
+        """Auto-send to scout-found leads only (lead_type='scraped'). Skips imported leads."""
+        limit = int(kwargs.get("limit", 25))
+        channel = kwargs.get("channel", "email")
+
+        try:
+            from app.database import db_conn
+            with db_conn() as conn:
+                rows = conn.execute(
+                    """SELECT * FROM leads
+                       WHERE lead_type = 'scraped'
+                       AND business_email IS NOT NULL AND business_email != ''
+                       AND status != 'contacted'
+                       ORDER BY score DESC LIMIT ?""",
+                    (limit,),
+                ).fetchall()
+                scout_leads = [dict(r) for r in rows]
+        except Exception:
+            scout_leads = []
+
+        if not scout_leads:
+            return make_result(True, "No scout leads ready for auto-outreach.",
+                              stats={"auto_sent": 0}, duration=time.time() - start)
+
+        sent_count = 0
+        failed_count = 0
+        limiter = self._get_send_limiter()
+
+        for lead in scout_leads:
+            resolved = self.resolve_channel(lead, channel)
+            if resolved != "email":
+                failed_count += 1
+                continue
+
+            profile_name = self.smtp_profile.profile_name if self.smtp_profile else "default"
+            check = limiter.can_send(profile_name)
+            if not check["allowed"]:
+                logger.info("Rate limit hit, stopping auto-scout: %s", check["reason"])
+                break
+
+            message, is_html = self.generate_outreach_message(lead)
+            sent = self.send_email(lead, message, is_html=is_html)
+            if sent:
+                sent_count += 1
+                try:
+                    from app.database import mark_leads_contacted
+                    mark_leads_contacted([lead.get("id")], channel)
+                except Exception:
+                    pass
+
+        summary = f"Auto-scout sent: {sent_count} | Failed: {failed_count} | Scout leads processed: {len(scout_leads)}"
+        return make_result(True, summary,
+                          stats={"auto_sent": sent_count, "failed": failed_count, "total_scout": len(scout_leads)},
+                          duration=time.time() - start)
 
     def _get_candidates_from_json(self, limit: int) -> list:
         """Fallback: read from leads.json if database unavailable."""
@@ -460,9 +537,12 @@ class OutreachAgent(BaseAgent):
         profile_name = self.smtp_profile.profile_name if self.smtp_profile else "none configured"
         limiter = self._get_send_limiter()
         status = limiter.get_status(self.smtp_profile.profile_name if self.smtp_profile else "default")
+        html_mode = "HTML" if self.style.use_html_template else "Text"
         return (f"Outreach Agent (SMTP: {profile_name}). "
                 f"Today: {status['daily_sent']}/{status['daily_limit']} sent | "
-                f"AI emails: {'ON' if self.style.ai_email_enabled else 'OFF'}")
+                f"AI emails: {'ON' if self.style.ai_email_enabled else 'OFF'} | "
+                f"Mode: {html_mode} | "
+                f"Auto-scout: {'ON' if self.style.ai_email_enabled else 'OFF'}")
 
     def check_health(self) -> AgentHealth:
         keys = self._check_keys()
