@@ -408,7 +408,8 @@ def lead_scout_search(request: dict):
 
         llm = LLM()
         agent = LeadScoutAgent(bd, serper, llm)
-        leads = agent.run(user_input=niche, target=target)
+        result = agent.run(user_input=niche, target=target)
+        leads = result.data if result.success else []
 
         existing = _load_json("leads.json")
 
@@ -1021,7 +1022,8 @@ def geo_targets_auto_scout(request: dict = None):
                 niche = request.get("niche", "") if request else ""
                 location_parts = [p for p in [t.get("city"), t.get("state"), t.get("country")] if p]
                 query = f"{niche} in {', '.join(location_parts)}" if niche else ", ".join(location_parts)
-                leads = agent.run(user_input=query, target=request.get("target", 50) if request else 50)
+                res = agent.run(user_input=query, target=request.get("target", 50) if request else 50)
+                leads = res.data if res.success else []
                 saved = 0
                 for lead in leads:
                     lead["lead_type"] = "scraped"
@@ -1343,11 +1345,10 @@ def lead_scout_search_geo(request: dict):
         agent = LeadScoutAgent(None, serper, llm)
 
         # Niche + location for better targeting
-        search_query = niche
-        if location_query:
-            search_query = f"{niche} in {location_query}"
+        search_query = f"{niche} in {location_query}" if location_query else niche
 
-        leads = agent.run(user_input=search_query, target=target)
+        result = agent.run(user_input=search_query, target=target)
+        leads = result.data if result.success else []
 
         # Save with lead_type = 'scraped' and location info
         saved = 0
