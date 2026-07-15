@@ -648,6 +648,29 @@ def leads_debug():
         return {"error": str(e)}
 
 
+@router.post("/api/leads/debug-insert")
+def debug_insert():
+    """Insert a test lead directly to verify DB writes work."""
+    try:
+        from app.database import db_conn
+        import time
+        test_email = f"debuginsert{int(time.time())}@test.com"
+        with db_conn() as conn:
+            conn.execute(
+                "INSERT INTO leads (business_email, lead_type, source, status) VALUES (?, ?, ?, ?)",
+                (test_email, "imported", "debug", "new"),
+            )
+        # Read back in a separate connection
+        from app.database import db_conn as db2
+        with db2() as conn:
+            row = conn.execute("SELECT id, business_email, lead_type FROM leads WHERE business_email = ?", (test_email,)).fetchone()
+            found = dict(row) if row else None
+        return {"inserted_email": test_email, "found": found}
+    except Exception as e:
+        import traceback
+        return {"error": str(e), "traceback": traceback.format_exc()}
+
+
 @router.post("/api/outreach/preview")
 def outreach_preview(request: dict):
     """Preview leads ready for outreach. Supports lead_type filter."""
