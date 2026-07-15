@@ -650,6 +650,23 @@ def lead_status_summary():
 # Outreach Preview + Confirm flow
 # ---------------------------------------------------------------------------
 
+@router.get("/api/leads/debug")
+def leads_debug():
+    """Debug: show all leads and their columns."""
+    try:
+        from app.database import db_conn
+        with db_conn() as conn:
+            cols = [r[1] for r in conn.execute("PRAGMA table_info(leads)").fetchall()]
+            rows = conn.execute("SELECT * FROM leads LIMIT 50").fetchall()
+            return {
+                "total": len(rows),
+                "columns": cols,
+                "leads": [{k: r[k] for k in r.keys()} for r in rows],
+            }
+    except Exception as e:
+        return {"error": str(e)}
+
+
 @router.post("/api/outreach/preview")
 def outreach_preview(request: dict):
     """Preview leads ready for outreach. Supports lead_type filter."""
@@ -661,8 +678,9 @@ def outreach_preview(request: dict):
         candidates = get_outreach_candidates(limit=limit)
         if lead_type:
             candidates = [c for c in candidates if c.get("lead_type") == lead_type]
-    except Exception:
-        candidates = []
+    except Exception as e:
+        logger.exception("outreach_preview failed")
+        return {"success": False, "error": str(e), "candidates": [], "count": 0}
     for c in candidates:
         resolved = channel
         if channel == "auto":
