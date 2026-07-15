@@ -192,6 +192,14 @@ def init_db():
         except Exception:
             pass
 
+        # Migration: fix existing imported leads that have lead_type='cold' (old default)
+        try:
+            conn.execute(
+                "UPDATE leads SET lead_type = 'imported' WHERE source = 'manual_import' AND lead_type = 'cold'"
+            )
+        except Exception:
+            pass
+
         # Campaign tables (created here too for safety; campaign.py also creates them)
         conn.executescript("""
             CREATE TABLE IF NOT EXISTS campaigns (

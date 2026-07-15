@@ -497,6 +497,7 @@ def import_contacts(request: dict):
                 lead.setdefault("preferred_channel", "email")
                 lead["status"] = lead.get("status", "new")
                 lead["source"] = "manual_import"
+                lead["lead_type"] = "imported"
                 lead["outreach_ready"] = bool(lead.get("business_email"))
                 lead["needs_human"] = 0 if lead.get("business_email") else 1
                 if lead["needs_human"]:
