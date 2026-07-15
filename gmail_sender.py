@@ -51,7 +51,7 @@ class GmailSender:
             from google.oauth2.credentials import Credentials
             from googleapiclient.discovery import build
 
-            SCOPES = ["https://www.googleapis.com/auth/gmail.send"]
+            SCOPES = ["https://www.googleapis.com/auth/gmail.modify"]
 
             creds = None
 

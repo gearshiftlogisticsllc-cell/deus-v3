@@ -28,9 +28,11 @@ import logging
 from typing import Optional
 from dataclasses import dataclass
 
+from mode_config import get_daily_limit, get_hourly_limit, get_delay_range
+
 logger = logging.getLogger(__name__)
 
-# Default limits
+# Default limits (overridden by mode_config at runtime)
 DEFAULT_DAILY_LIMIT = 50
 WARMED_DAILY_LIMIT = 200
 DEFAULT_HOURLY_LIMIT = 10
@@ -114,7 +116,10 @@ class SendLimiter:
         current_hour = int(time.strftime("%H"))
 
         if profile_name not in self._limits:
-            self._limits[profile_name] = SendLimit()
+            self._limits[profile_name] = SendLimit(
+                daily_limit=get_daily_limit(),
+                hourly_limit=get_hourly_limit(),
+            )
 
         limit = self._limits[profile_name]
 
@@ -210,8 +215,10 @@ class SendLimiter:
         }
 
     def get_delay_seconds(self) -> float:
-        """Get a random delay for natural sending patterns."""
-        return random.uniform(DEFAULT_RANDOM_DELAY_MIN, DEFAULT_RANDOM_DELAY_MAX)
+        """Get a random delay for natural sending patterns.
+        Uses mode_config range (testing=180-300s, production=90-180s)."""
+        delay_min, delay_max = get_delay_range()
+        return random.uniform(delay_min, delay_max)
 
     def set_daily_limit(self, profile_name: str, limit: int):
         """Set daily limit for a profile."""

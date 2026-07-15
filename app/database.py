@@ -757,6 +757,26 @@ def is_email_already_contacted(email: str) -> bool:
         return row is not None
 
 
+def is_lead_unsubscribed(email: str) -> bool:
+    """Check if a lead has unsubscribed or been blacklisted."""
+    with db_conn() as conn:
+        row = conn.execute(
+            "SELECT 1 FROM leads WHERE business_email = ? AND status IN ('unsubscribed', 'blocked') LIMIT 1",
+            (email,),
+        ).fetchone()
+        return row is not None
+
+
+def mark_lead_unsubscribed(email: str) -> bool:
+    """Mark a lead as unsubscribed. Returns True if found and updated."""
+    with db_conn() as conn:
+        cursor = conn.execute(
+            "UPDATE leads SET status = 'unsubscribed', updated_at = ? WHERE business_email = ?",
+            (time.time(), email),
+        )
+        return cursor.rowcount > 0
+
+
 def get_contacted_emails() -> set:
     with db_conn() as conn:
         rows = conn.execute(

@@ -1,51 +1,35 @@
 """
 reply_detector.py — DEUS 3.0
-==============================
-IMAP-based email reply detection. Scans the inbox for replies from leads
-we've contacted. Safe for shared inboxes — only looks for replies TO our
-outbound emails, never touches other mail.
+=============================
+Gmail-API-based email reply detection. Scans the inbox for replies from
+leads we've contacted. Uses the same OAuth token as gmail_sender.py, so
+it works with 2FA and doesn't need App Passwords.
 
-Reads/Writes: leads.json, outreach_log.json
-Requires: IMAP_EMAIL, IMAP_PASSWORD (or SMTP_EMAIL/SMTP_PASSWORD)
+Also detects unsubscribe/stop keywords in replies and marks leads as
+unsubscribed in the database.
+
+Reads/Writes: leads (database via app.database)
+Requires: Gmail API OAuth token (configured via /api/gmail/auth-url)
 """
 
 import os
 import json
 import re
 import time
-import email
-import imaplib
+import base64
 import logging
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 
-from dotenv import load_dotenv
-
-load_dotenv()
-
 logger = logging.getLogger(__name__)
 
-LEADS_FILE = "leads.json"
-OUTREACH_LOG_FILE = "outreach_log.json"
 REPLY_STATE_FILE = "reply_state.json"
 
-IMAP_HOST = os.getenv("IMAP_HOST", "imap.gmail.com")
-IMAP_EMAIL = os.getenv("IMAP_EMAIL", "") or os.getenv("SMTP_EMAIL", "")
-IMAP_PASSWORD = os.getenv("IMAP_PASSWORD", "") or os.getenv("SMTP_PASSWORD", "")
-IMAP_PORT = int(os.getenv("IMAP_PORT", "993"))
-
-
-def _load_json(path: str, default=None):
-    try:
-        with open(path, encoding="utf-8") as f:
-            return json.load(f)
-    except Exception:
-        return default if default is not None else []
-
-
-def _save_json(path: str, data):
-    with open(path, "w", encoding="utf-8") as f:
-        json.dump(data, f, indent=2)
+UNSUBSCRIBE_KEYWORDS = [
+    "stop", "unsubscribe", "not interested", "remove",
+    "do not contact", "don't contact", "leave me alone",
+    "spam", "block", "opt out", "opt-out",
+]
 
 
 def _normalize_email(addr: str) -> str:
@@ -54,210 +38,292 @@ def _normalize_email(addr: str) -> str:
         return ""
     addr = addr.strip().lower()
     addr = re.sub(r"[<>]", "", addr)
-    # Take only the email part if "Name <email>" format
     match = re.search(r"[\w.+-]+@[\w-]+\.[\w.]+", addr)
     return match.group(0) if match else addr
 
 
-def _extract_reply_to(message_id: str) -> str:
-    """Extract the message-id this email is replying to."""
-    if not message_id:
+def _decode_body(payload: dict) -> str:
+    """Extract plain text from a Gmail API message payload."""
+    if not payload:
         return ""
-    # Clean angle brackets
-    return message_id.strip().strip("<>")
+    if payload.get("mimeType") == "text/plain":
+        data = payload.get("body", {}).get("data", "")
+        if data:
+            try:
+                return base64.urlsafe_b64decode(data).decode("utf-8", errors="replace")
+            except Exception:
+                return ""
+    if "parts" in payload:
+        texts = []
+        for part in payload["parts"]:
+            texts.append(_decode_body(part))
+        return "\n".join(t for t in texts if t)
+    return ""
+
+
+def _parse_header(payload: dict, name: str) -> str:
+    """Extract a specific header value from a Gmail API message payload headers."""
+    headers = payload.get("headers", [])
+    for h in headers:
+        if h.get("name", "").lower() == name.lower():
+            return h.get("value", "")
+    return ""
+
+
+def _check_unsubscribe(text: str) -> bool:
+    """Check if the message body contains unsubscribe/stop keywords."""
+    if not text:
+        return False
+    text_lower = text.lower()
+    for keyword in UNSUBSCRIBE_KEYWORDS:
+        if keyword in text_lower:
+            return True
+    return False
 
 
 class ReplyDetector:
     """
-    Scans IMAP inbox for replies from leads we've contacted.
+    Scans Gmail inbox for replies from leads we've contacted.
 
     Strategy:
-    1. Load outreach_log.json to know which emails we sent (and their message-ids)
-    2. Connect to IMAP, search for emails FROM those addresses
-    3. For each reply, check if it's in reply to one of our sent messages
-    4. Mark matching leads as "replied" in leads.json
+    1. Query contacted leads from database
+    2. Search Gmail inbox for recent messages FROM those addresses
+    3. Check for reply indicators (Re: subject, or any from-lead message)
+    4. Check for unsubscribe keywords in body
+    5. Mark matching leads as "replied" or "unsubscribed" in database
     """
 
     def __init__(self):
-        self.imap_email = IMAP_EMAIL
-        self.imap_password = IMAP_PASSWORD
-        self.state = _load_json(REPLY_STATE_FILE, {"last_check_uid": 0, "replies_found": []})
+        self._service = None
+        self._init_service()
+        self.state = self._load_state()
 
-    def _connect(self) -> Optional[imaplib.IMAP4_SSL]:
-        if not self.imap_email or not self.imap_password:
-            logger.warning("IMAP credentials not set. Set IMAP_EMAIL + IMAP_PASSWORD (or SMTP_EMAIL/SMTP_PASSWORD).")
-            return None
+    def _load_state(self) -> dict:
         try:
-            mail = imaplib.IMAP4_SSL(IMAP_HOST, IMAP_PORT)
-            mail.login(self.imap_email, self.imap_password)
-            return mail
+            with open(REPLY_STATE_FILE, "r") as f:
+                return json.load(f)
+        except Exception:
+            return {"last_check_id": "", "replies_found": []}
+
+    def _save_state(self):
+        try:
+            with open(REPLY_STATE_FILE, "w") as f:
+                json.dump(self.state, f, indent=2)
         except Exception as e:
-            logger.error("IMAP connection failed: %s", e)
-            return None
+            logger.warning("Failed to save reply state: %s", e)
 
-    def _get_sent_email_addresses(self) -> set:
-        """Build set of email addresses we've sent outreach to."""
-        leads = _load_json(LEADS_FILE)
-        addresses = set()
-        for lead in leads:
-            if isinstance(lead, dict):
-                email_addr = lead.get("business_email", "")
-                if email_addr:
-                    addresses.add(_normalize_email(email_addr))
-        return addresses
+    def _init_service(self):
+        """Initialize Gmail API service with OAuth2 credentials from DB."""
+        try:
+            from google.auth.transport.requests import Request
+            from google.oauth2.credentials import Credentials
+            from googleapiclient.discovery import build
+            from app.database import get_gmail_token
 
-    def _get_sent_message_ids(self) -> dict:
-        """Build map of message-id -> lead email from outreach_log.json.
-        Maps the In-Reply-To header we expect to see."""
-        log = _load_json(OUTREACH_LOG_FILE)
-        # We don't store message-ids in outreach_log yet, so we match by sender email
-        # This is the safe approach: any email FROM a lead we contacted = potential reply
-        return {}
+            SCOPES = ["https://www.googleapis.com/auth/gmail.modify"]
+
+            token_json = get_gmail_token()
+            if not token_json:
+                logger.info("No Gmail token in database — reply detector disabled")
+                return
+
+            creds = Credentials.from_authorized_user_info(json.loads(token_json), SCOPES)
+            if creds.expired and creds.refresh_token:
+                try:
+                    creds.refresh(Request())
+                    logger.info("Gmail token refreshed for reply detector")
+                except Exception as e:
+                    logger.warning("Token refresh failed for reply detector: %s", e)
+                    return
+
+            self._service = build("gmail", "v1", credentials=creds)
+            logger.info("Gmail API initialized for reply detection")
+
+        except ImportError:
+            logger.info("Gmail API packages not installed — reply detector disabled")
+        except Exception as e:
+            logger.warning("Gmail API init failed for reply detector: %s", e)
+
+    def _get_contacted_emails(self) -> dict:
+        """Build dict of {email: business_name} from database."""
+        result = {}
+        try:
+            from app.database import db_conn
+            with db_conn() as conn:
+                rows = conn.execute(
+                    """SELECT business_email, business_name, owner_name, id
+                       FROM leads
+                       WHERE business_email IS NOT NULL AND business_email != ''
+                       AND status IN ('contacted', 'replied')"""
+                ).fetchall()
+                for row in rows:
+                    email = _normalize_email(row["business_email"])
+                    if email:
+                        result[email] = {
+                            "business_name": row["business_name"] or "",
+                            "owner_name": row["owner_name"] or "",
+                            "id": row["id"],
+                        }
+        except Exception as e:
+            logger.warning("Failed to load contacted leads from DB: %s", e)
+        return result
 
     def scan(self, days_back: int = 7) -> dict:
         """
-        Scan inbox for replies from contacted leads.
+        Scan Gmail inbox for replies from contacted leads.
 
         Returns:
             {
                 "success": bool,
                 "replies_found": int,
                 "leads_marked": int,
-                "details": [{"email": ..., "lead_name": ..., "date": ...}],
+                "details": [{"email": ..., "lead_name": ..., "date": ..., "subject": ...}],
                 "error": str (if failed)
             }
         """
-        mail = self._connect()
-        if not mail:
+        if not self._service:
             return {"success": False, "replies_found": 0, "leads_marked": 0,
-                    "details": [], "error": "IMAP connection failed"}
+                    "details": [], "error": "Gmail API not configured. Authorize via /api/gmail/auth-url first."}
 
-        sent_addresses = self._get_sent_email_addresses()
-        if not sent_addresses:
-            mail.logout()
+        contacted = self._get_contacted_emails()
+        if not contacted:
             return {"success": True, "replies_found": 0, "leads_marked": 0,
-                    "details": [], "error": "No contacted leads found"}
-
-        leads = _load_json(LEADS_FILE)
-        leads_by_email = {}
-        for lead in leads:
-            if isinstance(lead, dict):
-                email_addr = _normalize_email(lead.get("business_email", ""))
-                if email_addr:
-                    leads_by_email[email_addr] = lead
+                    "details": [], "error": "No contacted leads found in database"}
 
         replies_found = 0
         leads_marked = 0
+        unsubscribed_marked = 0
         details = []
+        last_seen_id = self.state.get("last_check_id", "")
 
         try:
-            mail.select("INBOX")
+            since_epoch = int((datetime.now(timezone.utc) - timedelta(days=days_back)).timestamp())
+            query = f"is:inbox after:{since_epoch}"
 
-            # Search for emails from last N days
-            since_date = (datetime.now(timezone.utc) - timedelta(days=days_back)).strftime("%d-%b-%Y")
-            status, messages = mail.search(None, f'(SINCE "{since_date}")')
+            response = self._service.users().messages().list(
+                userId="me",
+                q=query,
+                maxResults=200,
+            ).execute()
 
-            if status != "OK":
-                mail.logout()
-                return {"success": False, "replies_found": 0, "leads_marked": 0,
-                        "details": [], "error": "IMAP search failed"}
+            messages = response.get("messages", [])
+            if not messages:
+                return {"success": True, "replies_found": 0, "leads_marked": 0,
+                        "details": [], "error": ""}
 
-            msg_ids = messages[0].split()
+            for msg in messages:
+                msg_id = msg["id"]
 
-            for msg_id in msg_ids:
+                # Skip already processed messages
+                if last_seen_id and msg_id <= last_seen_id:
+                    continue
+
                 try:
-                    # Skip already processed UIDs
-                    uid = int(msg_id)
-                    if uid <= self.state.get("last_check_uid", 0):
-                        continue
+                    msg_data = self._service.users().messages().get(
+                        userId="me",
+                        id=msg_id,
+                        format="full",
+                    ).execute()
 
-                    status, data = mail.fetch(msg_id, "(RFC822)")
-                    if status != "OK":
-                        continue
+                    payload = msg_data.get("payload", {})
+                    headers = payload.get("headers", [])
 
-                    raw_email = data[0][1]
-                    msg = email.message_from_bytes(raw_email)
-
-                    # Get sender
-                    from_header = msg.get("From", "")
+                    from_header = _parse_header(payload, "From")
                     from_email = _normalize_email(from_header)
-
-                    # Check if this is from a lead we contacted
-                    if from_email not in sent_addresses:
+                    if not from_email or from_email not in contacted:
                         continue
 
-                    # Check if it's actually a reply (has In-Reply-To or Re: subject)
-                    subject = msg.get("Subject", "")
-                    in_reply_to = msg.get("In-Reply-To", "")
-                    references = msg.get("References", "")
-                    is_reply = (
+                    subject = _parse_header(payload, "Subject")
+                    date_str = _parse_header(payload, "Date")
+                    in_reply_to = _parse_header(payload, "In-Reply-To")
+                    references = _parse_header(payload, "References")
+
+                    # Decode body for unsubscribe check
+                    body_text = _decode_body(payload)
+                    snippet = msg_data.get("snippet", "")
+
+                    is_reply = bool(
                         subject.lower().startswith("re:")
-                        or bool(in_reply_to)
-                        or bool(references)
+                        or in_reply_to
+                        or references
                     )
 
-                    # Also accept any email from a contacted lead as potential reply
-                    # (some email clients don't set In-Reply-To properly)
-                    if not is_reply:
-                        # Still count it — if a lead emails us, it's a reply
+                    lead_info = contacted[from_email]
+                    business_name = lead_info.get("business_name", from_email)
+
+                    details.append({
+                        "email": from_email,
+                        "lead_name": business_name,
+                        "date": date_str,
+                        "subject": subject,
+                        "msg_id": msg_id,
+                    })
+                    replies_found += 1
+
+                    # Check for unsubscribe keywords
+                    full_text = f"{subject} {snippet} {body_text}"
+                    if _check_unsubscribe(full_text):
+                        try:
+                            from app.database import mark_lead_unsubscribed
+                            if mark_lead_unsubscribed(from_email):
+                                unsubscribed_marked += 1
+                                logger.info("Unsubscribed %s due to keyword in reply", from_email)
+                        except Exception as e:
+                            logger.warning("Failed to mark %s unsubscribed: %s", from_email, e)
+                    else:
+                        # Mark as replied in database
+                        try:
+                            from app.database import db_conn
+                            with db_conn() as conn:
+                                conn.execute(
+                                    """UPDATE leads
+                                       SET status = 'replied',
+                                           replied_at = ?,
+                                           replied_subject = ?
+                                       WHERE business_email = ? AND status != 'replied' AND status != 'unsubscribed'""",
+                                    (time.time(), subject, from_email),
+                                )
+                                if conn.total_changes > 0:
+                                    leads_marked += 1
+                        except Exception as e:
+                            logger.warning("Failed to mark %s replied: %s", from_email, e)
+
+                    # Mark as read so we don't re-scan
+                    try:
+                        self._service.users().messages().modify(
+                            userId="me",
+                            id=msg_id,
+                            body={"removeLabelIds": ["UNREAD"]},
+                        ).execute()
+                    except Exception:
                         pass
-
-                    lead = leads_by_email.get(from_email)
-                    if lead:
-                        replies_found += 1
-                        lead_name = lead.get("business_name", from_email)
-                        date_str = msg.get("Date", "")
-
-                        details.append({
-                            "email": from_email,
-                            "lead_name": lead_name,
-                            "date": date_str,
-                            "subject": subject,
-                        })
-
-                        # Mark lead as replied
-                        if lead.get("status") != "replied":
-                            lead["status"] = "replied"
-                            lead["replied_at"] = time.time()
-                            lead["replied_subject"] = subject
-                            leads_marked += 1
 
                 except Exception as e:
                     logger.warning("Error processing message %s: %s", msg_id, e)
                     continue
 
             # Update state
-            if msg_ids:
-                self.state["last_check_uid"] = int(msg_ids[-1])
+            if messages:
+                self.state["last_check_id"] = messages[-1]["id"]
             self._save_state()
 
-            # Save leads
-            _save_json(LEADS_FILE, leads)
-
         except Exception as e:
-            logger.error("IMAP scan error: %s", e)
-            mail.logout()
+            logger.error("Gmail API scan error: %s", e)
             return {"success": False, "replies_found": 0, "leads_marked": 0,
                     "details": [], "error": str(e)}
-
-        try:
-            mail.logout()
-        except Exception:
-            pass
 
         return {
             "success": True,
             "replies_found": replies_found,
             "leads_marked": leads_marked,
+            "unsubscribed_marked": unsubscribed_marked,
             "details": details,
             "error": "",
         }
 
-    def _save_state(self):
-        _save_json(REPLY_STATE_FILE, self.state)
-
     def is_configured(self) -> bool:
-        return bool(self.imap_email and self.imap_password)
+        """Check if Gmail API is available for reply detection."""
+        return self._service is not None
 
 
 class EmailTracker:
@@ -271,6 +337,8 @@ class EmailTracker:
 
     This ensures FollowupAgent can properly calculate cooldowns
     and never contacts someone who replied.
+
+    Operates on lead dicts (not database) — stateless.
     """
 
     def __init__(self):
@@ -289,7 +357,6 @@ class EmailTracker:
         lead["channel_used"] = channel
         lead["last_channel"] = channel
 
-        # Append to outreach history
         if "outreach_history" not in lead:
             lead["outreach_history"] = []
 
@@ -313,24 +380,17 @@ class EmailTracker:
 
     def should_followup(self, lead: dict, cooldown_hours: int = 48, max_followups: int = 3) -> bool:
         """Determine if a lead should receive a follow-up."""
-        # Never follow up if replied
         if self.is_replied(lead):
             return False
-
-        # Never follow up if rejected/no_response after max attempts
-        if lead.get("status") in ("no_response", "rejected"):
+        if lead.get("status") in ("no_response", "rejected", "unsubscribed", "blocked"):
             return False
-
-        # Only follow up on contacted leads
         if lead.get("status") != "contacted":
             return False
 
-        # Check max followups
         followup_count = lead.get("followup_count", 0)
         if followup_count >= max_followups:
             return False
 
-        # Check cooldown
         last_contacted = lead.get("last_contacted_at")
         if not last_contacted:
             return False
@@ -345,39 +405,50 @@ def scan_for_replies(days_back: int = 7) -> dict:
     """One-shot scan. Returns results dict."""
     detector = ReplyDetector()
     if not detector.is_configured():
-        return {"success": False, "error": "IMAP not configured. Set IMAP_EMAIL + IMAP_PASSWORD."}
+        return {"success": False, "replies_found": 0, "leads_marked": 0,
+                "details": [], "error": "Gmail API not configured. Authorize via /api/gmail/auth-url first."}
     return detector.scan(days_back=days_back)
 
 
 def get_reply_status() -> dict:
     """Get current reply detection status."""
     detector = ReplyDetector()
-    leads = _load_json(LEADS_FILE)
-    replied = sum(1 for l in leads if isinstance(l, dict) and l.get("status") == "replied")
-    contacted = sum(1 for l in leads if isinstance(l, dict) and l.get("status") == "contacted")
+    try:
+        from app.database import db_conn
+        with db_conn() as conn:
+            replied = conn.execute(
+                "SELECT COUNT(*) as c FROM leads WHERE status = 'replied'"
+            ).fetchone()["c"]
+            contacted = conn.execute(
+                "SELECT COUNT(*) as c FROM leads WHERE status = 'contacted'"
+            ).fetchone()["c"]
+            unsubscribed = conn.execute(
+                "SELECT COUNT(*) as c FROM leads WHERE status = 'unsubscribed'"
+            ).fetchone()["c"]
+    except Exception:
+        replied = 0
+        contacted = 0
+        unsubscribed = 0
 
     return {
-        "imap_configured": detector.is_configured(),
-        "imap_host": IMAP_HOST,
-        "imap_email": IMAP_EMAIL[:3] + "***" if IMAP_EMAIL else "",
+        "gmail_configured": detector.is_configured(),
         "leads_replied": replied,
         "leads_contacted": contacted,
-        "last_check_uid": detector.state.get("last_check_uid", 0),
+        "leads_unsubscribed": unsubscribed,
+        "last_check_id": detector.state.get("last_check_id", ""),
     }
 
 
 def mark_lead_replied(email_addr: str) -> dict:
     """Manually mark a lead as replied (for manual override)."""
-    leads = _load_json(LEADS_FILE)
-    found = False
-    for lead in leads:
-        if isinstance(lead, dict) and _normalize_email(lead.get("business_email", "")) == _normalize_email(email_addr):
-            lead["status"] = "replied"
-            lead["replied_at"] = time.time()
-            lead["replied_source"] = "manual"
-            found = True
-            break
-
-    if found:
-        _save_json(LEADS_FILE, leads)
+    try:
+        from app.database import db_conn
+        with db_conn() as conn:
+            cursor = conn.execute(
+                "UPDATE leads SET status = 'replied', replied_at = ?, replied_source = 'manual' WHERE business_email = ?",
+                (time.time(), email_addr),
+            )
+            found = cursor.rowcount > 0
+    except Exception:
+        found = False
     return {"success": found, "email": email_addr}

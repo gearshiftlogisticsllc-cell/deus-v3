@@ -17,6 +17,8 @@ import json
 import logging
 from dotenv import load_dotenv
 
+from rules_engine import get_rules_context
+
 load_dotenv()
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
@@ -143,7 +145,15 @@ def ask_gemini(prompt: str) -> str:
 
 
 def think(prompt: str) -> str:
-    """Main entry point — tries Groq first, falls back to Gemini."""
+    """Main entry point — tries Groq first, falls back to Gemini.
+    Injects rules/regulations context from PDF if available."""
+    rules = get_rules_context()
+    if rules:
+        prompt = (
+            f"Company rules and regulations that must be followed:\n"
+            f"{rules}\n\n"
+            f"---\n\n{prompt}"
+        )
     return ask_groq(prompt)
 
 

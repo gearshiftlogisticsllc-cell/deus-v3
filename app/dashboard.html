@@ -71,6 +71,7 @@ tr:hover td{background:var(--panel2)}
 <div class="topbar">
   <h1>DEUS 3.0</h1>
   <span class="badge">LIVE</span>
+  <button id="mode-toggle" onclick="toggleMode()" style="padding:3px 12px;font-size:11px;font-weight:700;border-radius:4px;border:none;cursor:pointer;transition:all .2s">Loading...</button>
   <div class="right">
     <span><span class="dot"></span> Online</span>
     <span id="user-info" style="color:var(--cyan)">Loading...</span>
@@ -729,6 +730,45 @@ function refreshStats() {
 }
 setInterval(refreshStats, 10000);
 refreshStats();
+
+// Mode toggle
+function loadMode() {
+  fetch(API+'/api/mode').then(r=>r.json()).then(d=>{
+    const btn = document.getElementById('mode-toggle');
+    if (d.production) {
+      btn.textContent = 'PRODUCTION';
+      btn.style.background = 'var(--green)';
+      btn.style.color = '#000';
+    } else {
+      btn.textContent = 'TESTING';
+      btn.style.background = 'var(--amber)';
+      btn.style.color = '#000';
+    }
+  }).catch(()=>{
+    const btn = document.getElementById('mode-toggle');
+    btn.textContent = 'MODE ?';
+    btn.style.background = 'var(--muted)';
+    btn.style.color = '#000';
+  });
+}
+function toggleMode() {
+  const btn = document.getElementById('mode-toggle');
+  const current = btn.textContent === 'PRODUCTION';
+  const newMode = !current;
+  btn.disabled = true;
+  btn.textContent = '...';
+  fetch(API+'/api/mode', {
+    method: 'POST',
+    headers: {'Content-Type':'application/json'},
+    body: JSON.stringify({production: newMode}),
+  }).then(r=>r.json()).then(d=>{
+    loadMode();
+  }).catch(()=>{
+    btn.textContent = current ? 'PRODUCTION' : 'TESTING';
+    btn.disabled = false;
+  }).finally(()=>{ btn.disabled = false; });
+}
+loadMode();
 
 // Lead Scout
 let scoutResults = [];

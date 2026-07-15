@@ -33,7 +33,7 @@ SMTP_PROFILES_FILE = "smtp_profiles.json"
 class StyleConfig:
     tone: str = "professional"                 # professional | friendly | direct | formal
     max_words: int = 9999999                   # effectively unlimited
-    subject_template: str = "Quick proposal for {business_name}"
+    subject_template: str = "Quick opportunity for {business_name}"
     signature: str = ""                         # appended to every message
     custom_template: str = ""                   # if set, used INSTEAD of LLM generation
     custom_template_html: str = ""              # HTML version (newsletter/blog-style, with images)

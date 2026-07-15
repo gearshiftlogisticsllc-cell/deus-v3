@@ -22,6 +22,7 @@ import os
 import json
 import logging
 import time
+import random
 
 from base_agent import BaseAgent, AgentResult, AgentHealth, make_result, make_health
 from reply_detector import EmailTracker
@@ -33,6 +34,7 @@ from outreach_config import (
     load_style_config, render_custom_template,
     get_default_smtp_profile, get_smtp_profile, SmtpProfile,
 )
+import mode_config
 
 OUTREACH_LOG_FILE = "outreach_log.json"
 GMAIL_DAILY_CAP = 2000
@@ -46,6 +48,7 @@ class OutreachAgent(BaseAgent):
 
     def __init__(self, smtp_profile_name: str = None):
         self.client = None
+        self.gemini = None
         self.style = load_style_config()
 
         groq_key = os.getenv("GROQ_API_KEY", "")
@@ -55,6 +58,14 @@ class OutreachAgent(BaseAgent):
                 self.client = Groq(api_key=groq_key)
             except Exception as e:
                 logger.warning("Groq init failed: %s", e)
+
+        gemini_key = os.getenv("GEMINI_API_KEY", "")
+        if gemini_key:
+            try:
+                from google import genai
+                self.gemini = genai.Client(api_key=gemini_key)
+            except Exception as e:
+                logger.warning("Gemini init failed: %s", e)
 
         # Initialize deliverability modules
         self._email_sender = None
@@ -139,9 +150,72 @@ class OutreachAgent(BaseAgent):
             logger.error("Groq request failed: %s", e)
             return ""
 
+    def _gemini_mode_instruction(self) -> str:
+        """Return mode-specific Gemini system instruction for outreach emails.
+        Both modes focus on 'sell the meeting, not the service'."""
+        if mode_config.is_production():
+            return (
+                "You are writing professional B2B cold outreach emails for US HVAC "
+                "business owners. Your client offers dispatching, phone call handling, "
+                "and scheduling support services.\n\n"
+                "CRITICAL RULES:\n"
+                "- Plain text only — no HTML, no images, no URLs or external links.\n"
+                "- Never use spam trigger keywords: free, guarantee, cheap, act now, "
+                "limited time, exclusive deal, urgent.\n"
+                "- The single goal is to GET THE OWNER ON A BRIEF CALL OR CHAT. "
+                "Sell the meeting, not the service. Do not pitch features — "
+                "just suggest a conversation.\n"
+                "- Personalize with the business name and owner name (if provided).\n"
+                "- Every email must be structurally unique — vary the opening line, "
+                "sentence structure, and flow.\n"
+                "- Keep it under 150 words.\n"
+                "- Sign off generically without inventing a sender name.\n"
+                "- Do NOT include a subject line — just the email body."
+            )
+        return (
+            "You are writing highly varied, 100% unique plain-text cold outreach "
+            "emails. Your client is Growth Desk, offering virtual assistant services "
+            "to US HVAC companies.\n\n"
+            "CRITICAL RULES:\n"
+            "- Plain text only — no HTML, no images, no URLs or external links.\n"
+            "- Never use spam trigger keywords: free, guarantee, cheap, act now, "
+            "limited time, exclusive deal, urgent.\n"
+            "- The single goal is to GET THE OWNER ON A BRIEF CALL OR CHAT. "
+            "Sell the meeting, not the service. Do not pitch features — "
+            "just suggest a conversation.\n"
+            "- Personalize with the business name and owner name (if provided).\n"
+            "- Every email must be structurally unique — vary the opening line, "
+            "sentence structure, and flow.\n"
+            "- Keep it under 120 words.\n"
+            "- Sign off generically without inventing a sender name.\n"
+            "- Do NOT include a subject line — just the email body."
+        )
+
+    def _call_gemini(self, prompt: str, system_instruction: str) -> str:
+        """Call Gemini with a prompt and system instruction. Returns empty string on failure."""
+        if not self.gemini:
+            return ""
+        try:
+            from google import genai
+            response = self.gemini.models.generate_content(
+                model="gemini-2.5-flash",
+                contents=prompt,
+                config=genai.types.GenerateContentConfig(
+                    system_instruction=system_instruction,
+                    max_output_tokens=512,
+                    temperature=0.9,
+                ),
+            )
+            return response.text.strip()
+        except Exception as e:
+            logger.warning("Gemini email generation failed: %s", e)
+            return ""
+
     def generate_outreach_message(self, lead: dict) -> (str, bool):
-        """Returns (message_body, is_html) tuple."""
-        # If AI emails disabled or custom template set, use template
+        """Returns (message_body, is_html) tuple.
+        Uses Gemini with mode-specific system instructions, falls back to Groq,
+        then falls back to template.
+        Injects PDF rules context if available."""
         if not self.style.ai_email_enabled or (self.style.use_custom_template and self.style.custom_template):
             if self.style.use_custom_template and self.style.custom_template:
                 is_html = self.style.use_html_template and bool(self.style.custom_template_html)
@@ -150,24 +224,72 @@ class OutreachAgent(BaseAgent):
                 return body, is_html
             return self._fallback_template(lead), False
 
-        niche = lead.get("niche", "their industry")
-        business_name = lead.get("business_name", "there")
+        business_name = lead.get("business_name", "your business")
+        owner_name = lead.get("owner_name", "")
+        niche = lead.get("niche", "your industry")
         services = lead.get("services_offered", "")
 
+        # Load rules context from PDF (no-op if no PDF exists)
+        rules_context = ""
+        try:
+            from rules_engine import get_rules_context
+            rules_context = get_rules_context()
+        except Exception:
+            pass
+
+        owner_line = f" The owner is {owner_name}." if owner_name else ""
         task = (
-            f"Write a short, {self.style.tone} cold outreach email to "
-            f"'{business_name}', a business in the {niche} niche "
-            f"(services: {services or 'unspecified'}). "
-            f"The goal is to introduce a business proposal and request a "
-            f"brief appointment/call to discuss it — specifically: "
-            f"\"{self.style.call_to_action}\" "
-            f"No word limit. "
-            f"Sign off generically without inventing a sender name. "
-            f"Do not include a subject line, just the email body."
+            f"Write a short {self.style.tone} cold outreach email to "
+            f"'{business_name}', a {niche} business."
+            f"{owner_line}"
+            f" Services they may need: {services or 'not specified'}.\n\n"
+            f"Call to action: \"{self.style.call_to_action}\"\n\n"
+            f"Remember: sell the meeting, not the service. "
+            f"The only goal is to get the owner on a brief call or chat."
         )
-        message = self.think(task)
+
+        if rules_context:
+            task = (
+                f"Company rules and regulations:\n{rules_context}\n\n"
+                f"---\n\n{task}"
+            )
+
+        message = ""
+
+        # 1) Try Gemini with mode-specific system instruction
+        if self.gemini:
+            system_instruction = self._gemini_mode_instruction()
+            message = self._call_gemini(task, system_instruction)
+            if message:
+                logger.debug("Email generated via Gemini (%s mode)",
+                             "production" if mode_config.is_production() else "testing")
+
+        # 2) Fall back to Groq
+        if not message:
+            groq_task = (
+                f"Write a short, {self.style.tone} cold outreach email to "
+                f"'{business_name}', a business in the {niche} niche "
+                f"(services: {services or 'unspecified'}). "
+                f"Owner: {owner_name or 'not specified'}. "
+                f"The goal is to get them on a brief call — sell the meeting, "
+                f"not the service. Specifically: \"{self.style.call_to_action}\" "
+                f"Keep it under 120 words, plain text. "
+                f"Sign off generically without inventing a sender name. "
+                f"Do not include a subject line, just the email body."
+            )
+            if rules_context:
+                groq_task = (
+                    f"Company rules and regulations:\n{rules_context}\n\n"
+                    f"---\n\n{groq_task}"
+                )
+            message = self.think(groq_task)
+            if message:
+                logger.debug("Email generated via Groq (Gemini fallback)")
+
+        # 3) Fall back to template
         if not message:
             message, _ = self._fallback_template(lead)
+            logger.debug("Email generated via fallback template")
 
         if self.style.signature:
             message = f"{message}\n\n{self.style.signature}"
@@ -180,7 +302,7 @@ class OutreachAgent(BaseAgent):
         niche = lead.get("niche", "your industry")
         message = (
             f"Hi {business_name} team,\n\n"
-            f"I'd like to share a quick business proposal relevant to your "
+            f"Quick note — I have an idea relevant to your "
             f"{niche} work. {self.style.call_to_action}\n\n"
             f"Best regards"
         )
@@ -195,7 +317,7 @@ class OutreachAgent(BaseAgent):
                 niche=lead.get("niche", ""),
             )
         except (KeyError, IndexError):
-            return f"Quick proposal for {lead.get('business_name', 'your business')}"
+            return f"Quick thought for {lead.get('business_name', 'your business')}"
 
     def send_email(self, lead: dict, message: str, is_html: bool = False, lead_type: str = "imported") -> bool:
         """Send email via the unified email sender with all checks."""
@@ -407,12 +529,6 @@ class OutreachAgent(BaseAgent):
             return make_result(False, "No valid leads found for the given IDs.",
                               stats={}, duration=time.time() - start)
 
-        # Gmail daily cap redirect — if cap already reached, switch to scout leads
-        if not self._check_gmail_daily() and self.email_method in ("auto",):
-            logger.warning("Gmail daily cap reached (%d/%d) — switching to scout leads",
-                          self._gmail_daily_sent, GMAIL_DAILY_CAP)
-            return self._send_auto_scout(kwargs, start)
-
         sent_count = 0
         failed_count = 0
         skipped_count = 0
@@ -433,6 +549,17 @@ class OutreachAgent(BaseAgent):
                     from app.database import is_email_already_contacted
                     if is_email_already_contacted(email):
                         logger.info("Dedup: skipping already contacted %s", email)
+                        skipped_count += 1
+                        continue
+                except Exception:
+                    pass
+
+            # Blacklist check — skip unsubscribed/blocked leads
+            if email:
+                try:
+                    from app.database import is_lead_unsubscribed
+                    if is_lead_unsubscribed(email):
+                        logger.info("Blacklist: skipping unsubscribed %s", email)
                         skipped_count += 1
                         continue
                 except Exception:
@@ -460,6 +587,11 @@ class OutreachAgent(BaseAgent):
                     "smtp_profile": self.smtp_profile.profile_name if self.smtp_profile else None,
                     "lead_type": lead.get("lead_type", "unknown"),
                 })
+                # Mode-aware delay between sends (testing=180-300s, production=90-180s)
+                delay = limiter.get_delay_seconds()
+                logger.debug("Waiting %.1fs before next send (mode: %s)...",
+                             delay, "production" if mode_config.is_production() else "testing")
+                time.sleep(delay)
             else:
                 failed_count += 1
 
@@ -539,6 +671,17 @@ class OutreachAgent(BaseAgent):
                 except Exception:
                     pass
 
+            # Blacklist check
+            if email:
+                try:
+                    from app.database import is_lead_unsubscribed
+                    if is_lead_unsubscribed(email):
+                        logger.info("Blacklist: skipping unsubscribed %s", email)
+                        skipped_count += 1
+                        continue
+                except Exception:
+                    pass
+
             profile_name = self.smtp_profile.profile_name if self.smtp_profile else "default"
             check = limiter.can_send(profile_name)
             if not check["allowed"]:
@@ -554,6 +697,10 @@ class OutreachAgent(BaseAgent):
                     mark_leads_contacted([lead.get("id")], channel)
                 except Exception:
                     pass
+                # Mode-aware delay between sends
+                delay = limiter.get_delay_seconds()
+                logger.debug("Waiting %.1fs before next send...", delay)
+                time.sleep(delay)
 
         summary = f"Auto-scout sent: {sent_count} | Failed: {failed_count} | Skipped: {skipped_count} | Scout leads processed: {len(scout_leads)}"
         return make_result(True, summary,

@@ -568,6 +568,31 @@ def save_api_key(env_var: str, request: dict):
 
 
 # ---------------------------------------------------------------------------
+# Mode Toggle (Testing / Production)
+# ---------------------------------------------------------------------------
+
+@router.get("/api/mode")
+def get_mode():
+    """Get the current mode (testing/production) and its limits."""
+    try:
+        from mode_config import mode_info
+        return mode_info()
+    except Exception as e:
+        return {"production": False, "mode_name": "Testing", "error": str(e)}
+
+
+@router.post("/api/mode")
+def set_mode(request: dict):
+    """Toggle between testing and production mode. Persists to mode_state.json."""
+    try:
+        from mode_config import set_mode as _set_mode, mode_info
+        _set_mode(request.get("production", False))
+        return mode_info()
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+
+
+# ---------------------------------------------------------------------------
 # Reply Detection
 # ---------------------------------------------------------------------------
 
@@ -577,7 +602,7 @@ def reply_status():
         from reply_detector import get_reply_status
         return get_reply_status()
     except Exception as e:
-        return {"imap_configured": False, "error": str(e)}
+        return {"gmail_configured": False, "error": str(e)}
 
 
 @router.post("/api/replies/scan")
@@ -1125,6 +1150,7 @@ def due_calendar_entries(campaign_id: int = None):
 
 _oauth_verifiers: Dict[str, str] = {}  # state -> PKCE code_verifier
 
+@router.get("/api/google/auth-url")
 @router.get("/api/gmail/auth-url")
 def gmail_auth_url():
     """Get the Google OAuth URL for Gmail API authorization."""
@@ -1145,7 +1171,7 @@ def gmail_auth_url():
             return {"available": False, "error": "GOOGLE_CLIENT_ID not set in .env"}
         flow = Flow.from_client_config(
             client_config,
-            scopes=["https://www.googleapis.com/auth/gmail.send"],
+            scopes=["https://www.googleapis.com/auth/gmail.modify"],
         )
         flow.redirect_uri = os.getenv("GOOGLE_REDIRECT_URI", "http://localhost:8000/api/gmail/callback")
         auth_url, state = flow.authorization_url(
@@ -1162,6 +1188,7 @@ def gmail_auth_url():
         return {"available": False, "error": str(e)}
 
 
+@router.get("/api/google/callback")
 @router.get("/api/gmail/callback")
 def gmail_callback(code: str = None, error: str = None, state: str = None):
     """Handle Google OAuth2 callback — saves token.json."""
@@ -1183,7 +1210,7 @@ def gmail_callback(code: str = None, error: str = None, state: str = None):
         }
         flow = Flow.from_client_config(
             client_config,
-            scopes=["https://www.googleapis.com/auth/gmail.send"],
+            scopes=["https://www.googleapis.com/auth/gmail.modify"],
         )
         flow.redirect_uri = os.getenv("GOOGLE_REDIRECT_URI", "http://localhost:8000/api/gmail/callback")
         # Restore the PKCE code_verifier from the auth step
@@ -1204,6 +1231,7 @@ def gmail_callback(code: str = None, error: str = None, state: str = None):
         return {"success": False, "error": str(e)}
 
 
+@router.get("/api/google/status")
 @router.get("/api/gmail/status")
 def gmail_status():
     """Check if Gmail API is configured and authorized (DB-backed)."""
