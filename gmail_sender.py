@@ -148,6 +148,7 @@ class GmailSender:
 
         except Exception as e:
             logger.error("Gmail API send failed to %s: %s", to, e)
+            logger.error("Gmail sender email: %s — verify this matches the authorized OAuth account", self.sender_email)
             return False
 
     def send_batch(

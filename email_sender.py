@@ -102,17 +102,21 @@ class EmailSender:
         elif method == "resend":
             return self._send_resend(to, subject, body, from_name)
 
-        # Auto fallback: SMTP → Gmail API → Resend
+        # Auto fallback: Gmail API (works on Railway) → SMTP → Resend
+        gmail = self._get_gmail_sender()
+        if gmail and gmail.available:
+            result = self._send_gmail(to, subject, body, html, from_name)
+            if result["success"]:
+                return result
+            logger.info("Gmail API failed for %s, trying SMTP...", to)
+        else:
+            logger.info("Gmail API not available, trying SMTP...")
+
         result = self._send_smtp(to, subject, body, html)
         if result["success"]:
             return result
 
-        logger.info("SMTP failed for %s, trying Gmail API...", to)
-        result = self._send_gmail(to, subject, body, html, from_name)
-        if result["success"]:
-            return result
-
-        logger.info("Gmail API failed for %s, trying Resend...", to)
+        logger.info("SMTP failed for %s, trying Resend...", to)
         result = self._send_resend(to, subject, body, from_name)
         if result["success"]:
             return result
@@ -146,15 +150,15 @@ class EmailSender:
             host = profile.smtp_host or "smtp.gmail.com"
             email_addr = profile.smtp_email
             password = profile.smtp_password
-            timeout = 15
+            timeout = 5
 
-            ports_to_try = [profile.smtp_port]
-            if 465 not in ports_to_try:
-                ports_to_try.append(465)
-            if 587 not in ports_to_try:
-                ports_to_try.append(587)
+            ports = [profile.smtp_port]
+            if 465 not in ports:
+                ports.append(465)
+            if 587 not in ports:
+                ports.append(587)
 
-            for port in ports_to_try:
+            for port in ports:
                 try:
                     if port == 465:
                         with smtplib.SMTP_SSL(host, port, context=context, timeout=timeout) as server:
