@@ -323,6 +323,7 @@ class OutreachAgent(BaseAgent):
         """Send email via the unified email sender with all checks."""
         to_email = lead.get("business_email", "")
         if not to_email:
+            logger.warning("Send fail: no business_email for lead %s", lead.get("business_name", "?"))
             return False
 
         subject = self.render_subject(lead)
@@ -332,15 +333,15 @@ class OutreachAgent(BaseAgent):
         profile_name = self.smtp_profile.profile_name if self.smtp_profile else "default"
         check = limiter.can_send(profile_name)
         if not check["allowed"]:
-            logger.warning("Rate limit: %s", check["reason"])
+            logger.warning("Send fail: rate limit — %s (profile: %s)", check["reason"], profile_name)
             return False
 
         # Spam check
         spam_checker = self._get_spam_checker()
         spam_result = spam_checker.check_before_send(subject, message)
         if not spam_result["should_send"]:
-            logger.warning("Spam check blocked email to %s (score=%d): %s",
-                          to_email, spam_result["score"], spam_result["issues"])
+            logger.warning("Send fail: spam check blocked (score=%d) to %s: %s",
+                          spam_result["score"], to_email, spam_result["issues"])
             return False
 
         # Determine sending method based on email_method and lead_type
@@ -353,7 +354,7 @@ class OutreachAgent(BaseAgent):
             gmail_ok = self._check_gmail_daily()
             if not gmail_ok:
                 if lead_type == "imported":
-                    logger.warning("Gmail daily cap reached (%d/%d) — skipping imported lead",
+                    logger.warning("Send fail: Gmail daily cap reached (%d/%d) — skipping imported lead",
                                   self._gmail_daily_sent, GMAIL_DAILY_CAP)
                     return False
                 else:
@@ -371,6 +372,9 @@ class OutreachAgent(BaseAgent):
             lead_name=lead.get("business_name", ""),
             method=method_to_use,
         )
+
+        logger.debug("Send result for %s (method=%s): success=%s, method_used=%s, msg=%s",
+                     to_email, method_to_use, result.get("success"), result.get("method"), result.get("message"))
 
         if result["success"]:
             limiter.record_send(profile_name)
