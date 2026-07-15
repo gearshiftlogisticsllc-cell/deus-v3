@@ -679,7 +679,7 @@ def outreach_preview(request: dict):
     lead_type = request.get("lead_type", None)
     try:
         from app.database import get_outreach_candidates
-        candidates = get_outreach_candidates(limit=limit)
+        candidates = get_outreach_candidates(limit=limit, lead_type=lead_type or None)
         if lead_type:
             candidates = [c for c in candidates if c.get("lead_type") == lead_type]
     except Exception as e:
