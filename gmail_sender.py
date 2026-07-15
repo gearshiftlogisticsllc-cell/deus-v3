@@ -208,6 +208,6 @@ _gmail_sender: Optional[GmailSender] = None
 def get_gmail_sender() -> GmailSender:
     """Get or create the singleton GmailSender instance."""
     global _gmail_sender
-    if _gmail_sender is None:
+    if _gmail_sender is None or not _gmail_sender.available:
         _gmail_sender = GmailSender()
     return _gmail_sender
