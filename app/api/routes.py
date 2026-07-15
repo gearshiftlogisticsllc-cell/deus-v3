@@ -510,7 +510,7 @@ def import_contacts(request: dict):
             imported_count = result["imported"]
             skipped_count = result["skipped"]
 
-            return {"success": True, "imported": imported_count, "skipped_duplicates": skipped_count, "total_in_file": len(deduped)}
+            return {"success": True, "imported": imported_count, "skipped_duplicates": skipped_count, "total_in_file": len(deduped), "sample": deduped[0] if deduped else None}
         else:
             # Fallback: file path on server
             from contact_importer import import_contacts as do_import
