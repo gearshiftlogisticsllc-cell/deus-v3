@@ -14,6 +14,10 @@ import json
 from contextlib import contextmanager
 
 DB_PATH = os.path.join(os.path.dirname(os.path.dirname(__file__)), "deus.db")
+# Use Railway volume for persistence if available
+_VOLUME_PATH = os.getenv("RAILWAY_VOLUME_MOUNT_PATH") or os.getenv("RAILWAY_VOLUME_PATH", "")
+if _VOLUME_PATH:
+    DB_PATH = os.path.join(_VOLUME_PATH, "deus.db")
 
 
 def get_db():
