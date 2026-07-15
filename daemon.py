@@ -387,6 +387,10 @@ class DeusDaemon:
 
     def _auto_outreach_scout(self) -> dict:
         """Auto-send outreach to scout-found leads only (lead_type='scraped')."""
+        from outreach_agent import manual_send_active
+        if manual_send_active:
+            logger.info("Manual send in progress — skipping auto-scout this cycle")
+            return {"sent": 0}
         try:
             from outreach_agent import OutreachAgent
             agent = OutreachAgent()

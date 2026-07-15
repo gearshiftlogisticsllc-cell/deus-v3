@@ -139,6 +139,14 @@ tr:hover td{background:var(--panel2)}
           <button onclick="runScout()" id="scout-btn">Find Leads</button>
           <button class="btn-green" onclick="exportLeadsCSV()">Export CSV</button>
           <span id="scout-status"></span>
+          <div id="scout-progress-wrap" style="display:none;flex:1;align-self:center">
+            <div style="display:flex;align-items:center;gap:8px">
+              <div style="flex:1;height:6px;background:var(--border);border-radius:3px;overflow:hidden">
+                <div id="scout-progress-bar" style="height:100%;width:0%;background:var(--cyan);border-radius:3px;transition:width .3s ease"></div>
+              </div>
+              <span id="scout-progress-text" style="font-size:11px;color:var(--muted);white-space:nowrap">Starting...</span>
+            </div>
+          </div>
         </div>
       </div>
       <div class="section">
@@ -277,6 +285,14 @@ No character limit." style="width:100%;font-family:Consolas,monospace;font-size:
           <button onclick="runAutoScout()" id="out-auto-btn" class="btn-violet">🤖 Auto-Scout Send</button>
           <span id="out-selected-count" style="color:var(--cyan);font-size:12px;align-self:center"></span>
           <span id="out-auto-status" style="color:var(--muted);font-size:12px;align-self:center"></span>
+          <div id="out-progress-wrap" style="display:none;flex:1;align-self:center">
+            <div style="display:flex;align-items:center;gap:8px">
+              <div style="flex:1;height:6px;background:var(--border);border-radius:3px;overflow:hidden">
+                <div id="out-progress-bar" style="height:100%;width:0%;background:var(--green);border-radius:3px;transition:width .5s ease"></div>
+              </div>
+              <span id="out-progress-text" style="font-size:11px;color:var(--muted);white-space:nowrap">0 / 0</span>
+            </div>
+          </div>
         </div>
       </div>
       <div class="section" id="out-preview-section" style="display:none">
@@ -773,6 +789,53 @@ loadMode();
 
 // Lead Scout
 let scoutResults = [];
+function pollScoutProgress(jobId) {
+  const bar = document.getElementById('scout-progress-bar');
+  const txt = document.getElementById('scout-progress-text');
+  const wrap = document.getElementById('scout-progress-wrap');
+  const status = document.getElementById('scout-status');
+  wrap.style.display = 'block';
+  let attempts = 0;
+  const maxAttempts = 120;
+  const interval = setInterval(function() {
+    attempts++;
+    fetch(API+'/api/lead-scout/status/'+jobId).then(r=>r.json()).then(d=>{
+      bar.style.width = (d.progress||0)+'%';
+      txt.textContent = d.message||'Searching...';
+      if (d.status === 'done') {
+        clearInterval(interval);
+        wrap.style.display = 'none';
+        bar.style.width = '0%';
+        setBtn('scout-btn', false);
+        status.innerHTML = '';
+        if (d.success) {
+          scoutResults = d.leads || [];
+          renderScoutTable(scoutResults);
+          log('scout-log', 'Done. '+d.total+' leads found. '+d.new_saved+' new saved. ('+d.skipped+' skipped)', 'ok');
+          refreshStats();
+        } else {
+          log('scout-log', 'ERROR: '+(d.message||'Unknown error'), 'err');
+        }
+      } else if (d.status === 'error') {
+        clearInterval(interval);
+        wrap.style.display = 'none';
+        bar.style.width = '0%';
+        setBtn('scout-btn', false);
+        status.innerHTML = '';
+        log('scout-log', 'ERROR: '+(d.message||'Scout failed'), 'err');
+      }
+    }).catch(function() {
+      if (attempts >= maxAttempts) {
+        clearInterval(interval);
+        wrap.style.display='none';
+        setBtn('scout-btn', false);
+        status.innerHTML = '';
+        log('scout-log', 'Scout status check timeout', 'warn');
+      }
+    });
+  }, 1500);
+}
+
 function runScout() {
   const niche = document.getElementById('scout-niche').value.trim();
   if (!niche) { alert('Enter a niche to search for'); return; }
@@ -790,14 +853,11 @@ function runScout() {
       brightdata_key: document.getElementById('scout-bdkey').value.trim(),
     })
   }).then(r=>r.json()).then(d=>{
-    setBtn('scout-btn', false);
-    document.getElementById('scout-status').innerHTML = '';
-    if (d.success) {
-      scoutResults = d.leads || [];
-      renderScoutTable(scoutResults);
-      log('scout-log', 'Done. '+d.total+' leads found. '+d.new_saved+' new saved. ('+d.skipped+' skipped)', 'ok');
-      refreshStats();
+    if (d.job_id) {
+      pollScoutProgress(d.job_id);
     } else {
+      setBtn('scout-btn', false);
+      document.getElementById('scout-status').innerHTML = '';
       log('scout-log', 'ERROR: '+(d.error||'Unknown error'), 'err');
     }
   }).catch(e=>{
@@ -995,25 +1055,38 @@ function sendConfirmed() {
   });
 }
 
-function pollSendStatus(jobId) {
+function showSendProgress(jobId) {
+  const wrap = document.getElementById('out-progress-wrap');
+  const bar = document.getElementById('out-progress-bar');
+  const txt = document.getElementById('out-progress-text');
+  wrap.style.display = 'block';
   let attempts = 0;
-  const maxAttempts = 30;
+  const maxAttempts = 60;
   const interval = setInterval(function() {
     attempts++;
     fetch(API+'/api/outreach/status/'+jobId).then(r=>r.json()).then(d=>{
+      const total = d.total || 1;
+      const done = (d.sent||0) + (d.failed||0) + (d.skipped||0);
+      const pct = Math.min(100, Math.round(done / total * 100));
+      bar.style.width = pct+'%';
+      txt.textContent = 'Sent: '+(d.sent||0)+', Failed: '+(d.failed||0)+' — '+done+'/'+total;
       if (d.status === 'done' || d.status === 'error' || attempts >= maxAttempts) {
         clearInterval(interval);
+        wrap.style.display = 'none';
+        bar.style.width = '0%';
         if (d.status === 'done') log('out-log', 'Send complete: '+d.message, 'ok');
         else if (d.status === 'error') log('out-log', 'Send failed: '+d.message, 'err');
         else log('out-log', 'Status check timeout. Sent: '+d.sent+', Failed: '+d.failed, 'warn');
         refreshStats();
-      } else {
-        log('out-log', 'Still sending... (sent: '+d.sent+', failed: '+d.failed+')', 'info');
       }
     }).catch(function() {
-      if (attempts >= maxAttempts) { clearInterval(interval); log('out-log', 'Status check timeout', 'warn'); }
+      if (attempts >= maxAttempts) { clearInterval(interval); wrap.style.display='none'; log('out-log', 'Status check timeout', 'warn'); }
     });
-  }, 3000);
+  }, 2000);
+}
+
+function pollSendStatus(jobId) {
+  showSendProgress(jobId);
 }
 
 function runOutreach() { previewOutreach(); }

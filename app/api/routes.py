@@ -368,6 +368,8 @@ def delete_smtp_profile(name: str):
         raise HTTPException(status_code=500, detail=str(e))
 
 
+_scout_jobs: dict = {}
+
 @router.post("/api/lead-scout/search")
 def lead_scout_search(request: dict):
     niche = request.get("niche", "").strip()
@@ -378,64 +380,99 @@ def lead_scout_search(request: dict):
     use_serper = request.get("use_serper", False)
     brightdata_key = request.get("brightdata_key", "")
 
-    try:
-        from lead_scout_agent import (
-            LeadScoutAgent, LLM, SerperSource, BrightDataSource,
-            DuckDuckGoSource, DirectWebSource,
-        )
+    import threading, uuid
+    job_id = str(uuid.uuid4())[:8]
+    _scout_jobs[job_id] = {"status": "running", "progress": 0, "message": "Starting scout..."}
 
-        bd = BrightDataSource(
-            api_key=brightdata_key,
-            dataset_id=os.getenv("BRIGHTDATA_DATASET_ID", ""),
-            serp_zone=os.getenv("BRIGHTDATA_SERP_ZONE", ""),
-        ) if brightdata_key else None
-
-        serper_key = os.getenv("SERPER_API_KEY", "")
-        serper = SerperSource(serper_key) if (use_serper and serper_key) else None
-
-        ddg = DuckDuckGoSource()
-        direct = DirectWebSource()
-
-        sources = []
-        if ddg.enabled:
-            sources.append(ddg)
-        if direct.enabled:
-            sources.append(direct)
-        if bd and bd.enabled:
-            sources.append(bd)
-        if serper and serper.enabled:
-            sources.append(serper)
-
-        llm = LLM()
-        agent = LeadScoutAgent(bd, serper, llm)
-        result = agent.run(user_input=niche, target=target)
-        leads = result.data if result.success else []
-
-        existing = _load_json("leads.json")
-
-        def _dedup_key(lead):
-            return (
-                lead.get("business_email")
-                or lead.get("website")
-                or lead.get("phone")
-                or f"{lead.get('business_name', '')}|{lead.get('location', '')}"
-                or f"__unknown_{id(lead)}"
+    def _do_scout():
+        try:
+            from lead_scout_agent import (
+                LeadScoutAgent, LLM, SerperSource, BrightDataSource,
+                DuckDuckGoSource, DirectWebSource,
             )
 
-        seen = {_dedup_key(l) for l in existing if isinstance(l, dict)}
-        new = [l for l in leads if _dedup_key(l) not in seen]
-        existing.extend(new)
-        _save_json("leads.json", existing)
+            _scout_jobs[job_id] = {"status": "running", "progress": 5, "message": "Setting up sources..."}
 
-        return {
-            "success": True,
-            "leads": leads,
-            "total": len(leads),
-            "new_saved": len(new),
-            "skipped": len(leads) - len(new),
-        }
-    except Exception as e:
-        return {"success": False, "error": str(e), "leads": [], "total": 0}
+            bd = BrightDataSource(
+                api_key=brightdata_key,
+                dataset_id=os.getenv("BRIGHTDATA_DATASET_ID", ""),
+                serp_zone=os.getenv("BRIGHTDATA_SERP_ZONE", ""),
+            ) if brightdata_key else None
+
+            serper_key = os.getenv("SERPER_API_KEY", "")
+            serper = SerperSource(serper_key) if (use_serper and serper_key) else None
+
+            ddg = DuckDuckGoSource()
+            direct = DirectWebSource()
+
+            sources = []
+            if ddg.enabled:
+                sources.append(ddg)
+            if direct.enabled:
+                sources.append(direct)
+            if bd and bd.enabled:
+                sources.append(bd)
+            if serper and serper.enabled:
+                sources.append(serper)
+
+            _scout_jobs[job_id] = {"status": "running", "progress": 10, "message": f"Searching for '{niche}' leads..."}
+
+            llm = LLM()
+            agent = LeadScoutAgent(bd, serper, llm)
+            result = agent.run(user_input=niche, target=target)
+            leads = result.data if result.success else []
+
+            _scout_jobs[job_id] = {"status": "running", "progress": 70, "message": f"Found {len(leads)} leads, deduplicating..."}
+
+            existing = _load_json("leads.json")
+
+            def _dedup_key(lead):
+                return (
+                    lead.get("business_email")
+                    or lead.get("website")
+                    or lead.get("phone")
+                    or f"{lead.get('business_name', '')}|{lead.get('location', '')}"
+                    or f"__unknown_{id(lead)}"
+                )
+
+            seen = {_dedup_key(l) for l in existing if isinstance(l, dict)}
+            new = [l for l in leads if _dedup_key(l) not in seen]
+            existing.extend(new)
+            _save_json("leads.json", existing)
+
+            _scout_jobs[job_id] = {
+                "status": "done",
+                "progress": 100,
+                "message": f"Done. {len(leads)} found, {len(new)} new, {len(leads) - len(new)} skipped",
+                "leads": leads,
+                "total": len(leads),
+                "new_saved": len(new),
+                "skipped": len(leads) - len(new),
+                "success": True,
+            }
+        except Exception as e:
+            _scout_jobs[job_id] = {
+                "status": "error",
+                "progress": 100,
+                "message": str(e),
+                "success": False,
+                "leads": [],
+                "total": 0,
+            }
+
+    t = threading.Thread(target=_do_scout, daemon=True)
+    t.start()
+
+    return {"success": True, "job_id": job_id, "message": "Scout started in background"}
+
+
+@router.get("/api/lead-scout/status/{job_id}")
+def lead_scout_status(job_id: str):
+    """Check background scout job status."""
+    job = _scout_jobs.get(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+    return job
 
 
 @router.post("/api/leads/import")
@@ -730,18 +767,21 @@ def outreach_send(request: dict):
 
     def _do_send():
         try:
-            from outreach_agent import OutreachAgent
+            from outreach_agent import OutreachAgent, _send_progress
             agent = OutreachAgent()
-            result = agent.run(mode="send", lead_ids=lead_ids, channel=channel)
+            agent.run(mode="send", lead_ids=lead_ids, channel=channel, job_id=job_id)
+            prog = _send_progress.get(job_id, {})
             _send_jobs[job_id] = {
-                "status": "done",
-                "sent": result.stats.get("sent", 0),
-                "failed": result.stats.get("failed", 0),
-                "message": result.message,
+                "status": prog.get("status", "done"),
+                "sent": prog.get("sent", 0),
+                "failed": prog.get("failed", 0),
+                "skipped": prog.get("skipped", 0),
+                "total": prog.get("total", len(lead_ids)),
+                "message": f"Sent: {prog.get('sent', 0)}, Failed: {prog.get('failed', 0)}, Skipped: {prog.get('skipped', 0)}",
             }
-            logger.info("Background send [%s] complete: %s", job_id, result.message)
+            logger.info("Background send [%s] complete: %s", job_id, _send_jobs[job_id]["message"])
         except Exception as e:
-            _send_jobs[job_id] = {"status": "error", "sent": 0, "failed": len(lead_ids), "message": str(e)}
+            _send_jobs[job_id] = {"status": "error", "sent": 0, "failed": len(lead_ids), "total": len(lead_ids), "message": str(e)}
             logger.error("Background send [%s] failed: %s", job_id, e)
 
     t = threading.Thread(target=_do_send, daemon=True)
@@ -757,11 +797,20 @@ def outreach_send(request: dict):
 
 @router.get("/api/outreach/status/{job_id}")
 def outreach_status(job_id: str):
-    """Check background send job status."""
-    job = _send_jobs.get(job_id)
-    if not job:
+    """Check background send job status with live progress."""
+    from outreach_agent import _send_progress
+    live = _send_progress.get(job_id, {})
+    job = _send_jobs.get(job_id, {})
+    if not job and not live:
         raise HTTPException(status_code=404, detail="Job not found")
-    return job
+    return {**live, **job}
+
+
+@router.get("/api/manual-send/active")
+def manual_send_active():
+    """Check if a manual send is currently in progress."""
+    from outreach_agent import manual_send_active as _active
+    return {"active": _active}
 
 
 @router.get("/api/leads/list")

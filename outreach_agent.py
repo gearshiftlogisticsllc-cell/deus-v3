@@ -39,6 +39,9 @@ import mode_config
 OUTREACH_LOG_FILE = "outreach_log.json"
 GMAIL_DAILY_CAP = 2000
 
+manual_send_active = False
+_send_progress: dict = {}
+
 
 class OutreachAgent(BaseAgent):
     name = "OutreachAgent"
@@ -517,6 +520,7 @@ class OutreachAgent(BaseAgent):
         """Send emails to confirmed lead IDs only."""
         lead_ids = kwargs.get("lead_ids", [])
         channel = kwargs.get("channel", "email")
+        job_id = kwargs.get("job_id", None)
 
         if not lead_ids:
             return make_result(False, "No lead IDs provided. Use preview first, then send with lead_ids.",
@@ -533,6 +537,9 @@ class OutreachAgent(BaseAgent):
             return make_result(False, "No valid leads found for the given IDs.",
                               stats={}, duration=time.time() - start)
 
+        global manual_send_active, _send_progress
+        manual_send_active = True
+
         sent_count = 0
         failed_count = 0
         skipped_count = 0
@@ -541,6 +548,15 @@ class OutreachAgent(BaseAgent):
         limiter = self._get_send_limiter()
 
         for lead in leads:
+            if job_id:
+                _send_progress[job_id] = {
+                    "status": "running",
+                    "sent": sent_count,
+                    "failed": failed_count,
+                    "skipped": skipped_count,
+                    "total": len(leads),
+                    "current": lead.get("business_name", ""),
+                }
             resolved = self.resolve_channel(lead, channel)
             if resolved != "email":
                 failed_count += 1
@@ -598,6 +614,27 @@ class OutreachAgent(BaseAgent):
                 time.sleep(delay)
             else:
                 failed_count += 1
+
+            if job_id:
+                _send_progress[job_id] = {
+                    "status": "running",
+                    "sent": sent_count,
+                    "failed": failed_count,
+                    "skipped": skipped_count,
+                    "total": len(leads),
+                    "current": lead.get("business_name", ""),
+                }
+
+        if job_id:
+            _send_progress[job_id] = {
+                "status": "done",
+                "sent": sent_count,
+                "failed": failed_count,
+                "skipped": skipped_count,
+                "total": len(lead_ids),
+            }
+
+        manual_send_active = False
 
         if log_entries:
             try:
