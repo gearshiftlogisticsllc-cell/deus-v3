@@ -196,11 +196,10 @@ def init_db():
         except Exception:
             pass
 
-        # Migration: fix existing imported leads that have lead_type='cold' (old default)
+        # Migration: fix existing leads that have lead_type='cold' (old default)
         try:
-            conn.execute(
-                "UPDATE leads SET lead_type = 'imported' WHERE source = 'manual_import' AND lead_type = 'cold'"
-            )
+            conn.execute("UPDATE leads SET lead_type = 'imported' WHERE source = 'manual_import' AND lead_type = 'cold'")
+            conn.execute("UPDATE leads SET lead_type = 'scraped' WHERE source NOT IN ('manual_import','import') AND (lead_type IS NULL OR lead_type = 'cold')")
         except Exception:
             pass
 

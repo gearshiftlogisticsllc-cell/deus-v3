@@ -505,33 +505,10 @@ def import_contacts(request: dict):
                     lead["needs_human_reason"] = "Imported contact has no email — needs a call."
 
             # Save to database
-            try:
-                from app.database import upsert_leads_batch
-                result = upsert_leads_batch(deduped)
-                imported_count = result["imported"]
-                skipped_count = result["skipped"]
-            except Exception as e:
-                # Fallback to leads.json
-                leads_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "leads.json")
-                existing = []
-                try:
-                    with open(leads_path) as f:
-                        existing = json.load(f)
-                except (FileNotFoundError, json.JSONDecodeError):
-                    existing = []
-                existing_keys = {l.get("business_email") or l.get("phone") for l in existing if isinstance(l, dict)}
-                imported_count = 0
-                skipped_count = 0
-                for lead in deduped:
-                    key = lead.get("business_email") or lead.get("phone")
-                    if key in existing_keys:
-                        skipped_count += 1
-                        continue
-                    existing.append(lead)
-                    existing_keys.add(key)
-                    imported_count += 1
-                with open(leads_path, "w") as f:
-                    json.dump(existing, f, indent=2)
+            from app.database import upsert_leads_batch
+            result = upsert_leads_batch(deduped)
+            imported_count = result["imported"]
+            skipped_count = result["skipped"]
 
             return {"success": True, "imported": imported_count, "skipped_duplicates": skipped_count, "total_in_file": len(deduped)}
         else:
