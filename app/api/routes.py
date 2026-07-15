@@ -510,7 +510,7 @@ def import_contacts(request: dict):
             imported_count = result["imported"]
             skipped_count = result["skipped"]
 
-            return {"success": True, "imported": imported_count, "skipped_duplicates": skipped_count, "total_in_file": len(deduped), "sample": deduped[0] if deduped else None}
+            return {"success": True, "imported": imported_count, "skipped_duplicates": skipped_count, "total_in_file": len(deduped)}
         else:
             # Fallback: file path on server
             from contact_importer import import_contacts as do_import
@@ -639,36 +639,10 @@ def leads_debug():
             return {
                 "total": len(rows),
                 "columns": cols,
-                "db_path": DB_PATH,
-                "db_exists": os.path.exists(DB_PATH),
-                "db_size": os.path.getsize(DB_PATH) if os.path.exists(DB_PATH) else 0,
                 "leads": [{k: r[k] for k in r.keys()} for r in rows],
             }
     except Exception as e:
         return {"error": str(e)}
-
-
-@router.post("/api/leads/debug-insert")
-def debug_insert():
-    """Insert a test lead directly to verify DB writes work."""
-    try:
-        from app.database import db_conn, upsert_lead
-        import time
-        test_email = f"debuginsert{int(time.time())}@test.com"
-        # Test 1: direct INSERT via upsert_lead
-        lid = upsert_lead({"business_email": test_email, "lead_type": "imported", "source": "manual_import", "status": "new"})
-        # Test 2: read back in separate connection
-        from app.database import db_conn as db2
-        with db2() as conn:
-            row = conn.execute("SELECT id, business_email, lead_type FROM leads WHERE business_email = ?", (test_email,)).fetchone()
-            found = dict(row) if row else None
-        # Test 3: count total
-        with db2() as conn:
-            total = conn.execute("SELECT COUNT(*) as c FROM leads").fetchone()["c"]
-        return {"upsert_returned_id": lid, "found_in_db": found, "total_leads": total, "test_email": test_email}
-    except Exception as e:
-        import traceback
-        return {"error": str(e), "traceback": traceback.format_exc()}
 
 
 @router.post("/api/outreach/preview")
