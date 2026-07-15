@@ -652,20 +652,20 @@ def leads_debug():
 def debug_insert():
     """Insert a test lead directly to verify DB writes work."""
     try:
-        from app.database import db_conn
+        from app.database import db_conn, upsert_lead
         import time
         test_email = f"debuginsert{int(time.time())}@test.com"
-        with db_conn() as conn:
-            conn.execute(
-                "INSERT INTO leads (business_email, lead_type, source, status) VALUES (?, ?, ?, ?)",
-                (test_email, "imported", "debug", "new"),
-            )
-        # Read back in a separate connection
+        # Test 1: direct INSERT via upsert_lead
+        lid = upsert_lead({"business_email": test_email, "lead_type": "imported", "source": "manual_import", "status": "new"})
+        # Test 2: read back in separate connection
         from app.database import db_conn as db2
         with db2() as conn:
             row = conn.execute("SELECT id, business_email, lead_type FROM leads WHERE business_email = ?", (test_email,)).fetchone()
             found = dict(row) if row else None
-        return {"inserted_email": test_email, "found": found}
+        # Test 3: count total
+        with db2() as conn:
+            total = conn.execute("SELECT COUNT(*) as c FROM leads").fetchone()["c"]
+        return {"upsert_returned_id": lid, "found_in_db": found, "total_leads": total, "test_email": test_email}
     except Exception as e:
         import traceback
         return {"error": str(e), "traceback": traceback.format_exc()}
