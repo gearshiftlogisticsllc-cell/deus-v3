@@ -631,13 +631,17 @@ def lead_status_summary():
 def leads_debug():
     """Debug: show all leads and their columns."""
     try:
-        from app.database import db_conn
+        from app.database import db_conn, DB_PATH
+        import os
         with db_conn() as conn:
             cols = [r[1] for r in conn.execute("PRAGMA table_info(leads)").fetchall()]
             rows = conn.execute("SELECT * FROM leads LIMIT 50").fetchall()
             return {
                 "total": len(rows),
                 "columns": cols,
+                "db_path": DB_PATH,
+                "db_exists": os.path.exists(DB_PATH),
+                "db_size": os.path.getsize(DB_PATH) if os.path.exists(DB_PATH) else 0,
                 "leads": [{k: r[k] for k in r.keys()} for r in rows],
             }
     except Exception as e:
