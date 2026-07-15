@@ -807,6 +807,34 @@ def check_leads_contacted(request: dict):
         return {"contacted": {e: False for e in emails}}
 
 
+@router.delete("/api/leads/{lead_id}")
+def delete_lead(lead_id: int):
+    """Delete a single lead by ID."""
+    try:
+        from app.database import delete_lead as _delete
+        _delete(lead_id)
+        return {"success": True, "deleted_id": lead_id}
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+
+
+@router.post("/api/leads/bulk-delete")
+def bulk_delete_leads(request: dict):
+    """Delete multiple leads by IDs."""
+    ids = request.get("ids", [])
+    if not ids:
+        raise HTTPException(status_code=400, detail="ids list is required")
+    try:
+        from app.database import delete_lead as _delete
+        deleted = 0
+        for lid in ids:
+            _delete(lid)
+            deleted += 1
+        return {"success": True, "deleted_count": deleted}
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+
+
 # ---------------------------------------------------------------------------
 # Daemon
 # ---------------------------------------------------------------------------

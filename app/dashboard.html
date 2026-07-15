@@ -284,11 +284,12 @@ No character limit." style="width:100%;font-family:Consolas,monospace;font-size:
         <div class="row" style="margin-bottom:8px">
           <label style="font-size:12px;color:var(--cyan);cursor:pointer"><input type="checkbox" id="out-select-all" onchange="toggleSelectAll()"> Select All</label>
           <span style="font-size:11px;color:var(--muted)">Showing <span id="out-lead-type-label">all</span> leads</span>
+          <button class="btn-red" onclick="deleteSelectedLeads()" id="btn-delete-selected" style="padding:3px 10px;font-size:11px;display:none">Delete Selected</button>
         </div>
         <div class="tbl-wrap" style="max-height:400px">
           <table><thead><tr>
             <th style="width:30px"><input type="checkbox" id="out-check-all" onchange="toggleSelectAll()"></th>
-            <th>Business</th><th>Email</th><th>Type</th><th>Channel</th><th>Status</th>
+            <th>Business</th><th>Email</th><th>Type</th><th>Channel</th><th>Status</th><th style="width:50px"></th>
           </tr></thead><tbody id="out-preview-tbody"></tbody></table>
         </div>
       </div>
@@ -884,6 +885,7 @@ function renderPreviewTable() {
     html += '<td>'+typeLabel+'</td>';
     html += '<td style="color:#5EEAFF">'+(lead.channel||'-')+'</td>';
     html += '<td><span style="color:'+statusColor+'">'+statusText+'</span></td>';
+    html += '<td><button onclick="deleteLead('+(lead.id)+',\''+(lead.business_name||'this')+'\')" style="background:var(--red);color:#fff;border:none;padding:2px 6px;border-radius:3px;cursor:pointer;font-size:10px">✕</button></td>';
     html += '</tr>';
   });
   document.getElementById('out-preview-tbody').innerHTML = html;
@@ -894,6 +896,7 @@ function renderPreviewTable() {
 function toggleLead(id, checked) {
   if (checked) outSelectedIds.add(id); else outSelectedIds.delete(id);
   updateSelectedCount();
+  document.getElementById('btn-delete-selected').style.display = outSelectedIds.size > 0 ? 'inline-block' : 'none';
 }
 
 function toggleSelectAll() {
@@ -903,10 +906,48 @@ function toggleSelectAll() {
   else { outSelectedIds = new Set(); }
   renderPreviewTable();
   updateSelectedCount();
+  document.getElementById('btn-delete-selected').style.display = outSelectedIds.size > 0 ? 'inline-block' : 'none';
 }
 
 function updateSelectedCount() {
   document.getElementById('out-selected-count').textContent = outSelectedIds.size+' selected';
+}
+
+function deleteLead(id, name) {
+  if (!confirm('Delete "'+name+'" from leads?')) return;
+  fetch(API+'/api/leads/'+id, { method:'DELETE' })
+    .then(r=>r.json()).then(d=>{
+      if (d.success) {
+        log('out-log', 'Deleted lead #'+id+' ('+name+')', 'ok');
+        outPreviewData = outPreviewData.filter(l => l.id !== id);
+        outSelectedIds.delete(id);
+        renderPreviewTable();
+        refreshStats();
+      } else {
+        log('out-log', 'Delete failed: '+(d.error||'unknown'), 'err');
+      }
+    }).catch(e => log('out-log', 'Delete error: '+e, 'err'));
+}
+
+function deleteSelectedLeads() {
+  const ids = Array.from(outSelectedIds);
+  if (!ids.length) return;
+  if (!confirm('Delete '+ids.length+' selected lead'+(ids.length>1?'s':'')+'?')) return;
+  fetch(API+'/api/leads/bulk-delete', {
+    method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({ids}),
+  }).then(r=>r.json()).then(d=>{
+    if (d.success) {
+      log('out-log', 'Deleted '+d.deleted_count+' leads', 'ok');
+      outPreviewData = outPreviewData.filter(l => !outSelectedIds.has(l.id));
+      outSelectedIds = new Set();
+      renderPreviewTable();
+      refreshStats();
+      document.getElementById('btn-delete-selected').style.display = 'none';
+    } else {
+      log('out-log', 'Bulk delete failed: '+(d.error||'unknown'), 'err');
+    }
+  }).catch(e => log('out-log', 'Bulk delete error: '+e, 'err'));
 }
 
 function previewOutreachWithDedup() {
