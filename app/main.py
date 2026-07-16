@@ -56,7 +56,7 @@ init_db()
 # Start daemon on boot (if enabled)
 try:
     from daemon import get_daemon
-    daemon_enabled = os.getenv("DAEMON_AUTO_START", "true").lower() == "true"
+    daemon_enabled = os.getenv("DAEMON_AUTO_START", "false").lower() == "true"
     if daemon_enabled:
         daemon = get_daemon()
         daemon.start()

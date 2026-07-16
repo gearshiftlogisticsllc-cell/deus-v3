@@ -52,6 +52,7 @@ class DaemonStatus:
     errors: int = 0
     last_error: str = ""
     interval_seconds: int = DEFAULT_INTERVAL_SECONDS
+    auto_stop_at: float = 0.0  # timestamp when daemon should auto-stop
 
 
 class DeusDaemon:
@@ -72,6 +73,7 @@ class DeusDaemon:
         self._thread: Optional[threading.Thread] = None
         self._stop_event = threading.Event()
         self._callback: Optional[Callable] = None
+        self._auto_stop_timer: Optional[threading.Thread] = None
 
         self._status = DaemonStatus(
             interval_seconds=self._interval,
@@ -117,8 +119,12 @@ class DeusDaemon:
     # Lifecycle
     # ------------------------------------------------------------------
 
-    def start(self):
-        """Start the daemon background thread."""
+    def start(self, auto_stop_hours: int = 0):
+        """Start the daemon background thread.
+        
+        Args:
+            auto_stop_hours: If > 0, automatically stop after this many hours.
+        """
         if self._running:
             logger.warning("Daemon already running")
             return
@@ -128,6 +134,20 @@ class DeusDaemon:
         self._status.started_at = time.time()
         self._stop_event.clear()
 
+        if auto_stop_hours > 0:
+            self._status.auto_stop_at = time.time() + auto_stop_hours * 3600
+            self._auto_stop_timer = threading.Thread(
+                target=self._auto_stop_waiter,
+                args=(auto_stop_hours * 3600,),
+                daemon=True,
+                name="DEUS-AutoStop",
+            )
+            self._auto_stop_timer.start()
+            logger.info("Daemon will auto-stop in %d hours", auto_stop_hours)
+        else:
+            self._status.auto_stop_at = 0
+            self._auto_stop_timer = None
+
         self._thread = threading.Thread(
             target=self._run_loop,
             daemon=True,
@@ -136,11 +156,23 @@ class DeusDaemon:
         self._thread.start()
         logger.info("Daemon started (interval: %ds)", self._interval)
 
+    def _auto_stop_waiter(self, seconds: float):
+        """Wait for the specified seconds, then stop the daemon."""
+        self._stop_event.wait(timeout=seconds)
+        if self._running:
+            logger.info("Auto-stop timer expired — stopping daemon")
+            self.stop()
+
     def stop(self):
         """Stop the daemon background thread."""
         self._running = False
         self._status.running = False
+        self._status.auto_stop_at = 0
         self._stop_event.set()
+
+        if self._auto_stop_timer and self._auto_stop_timer.is_alive():
+            self._auto_stop_timer.join(timeout=2)
+            self._auto_stop_timer = None
 
         if self._thread and self._thread.is_alive():
             self._thread.join(timeout=10)
@@ -470,12 +502,16 @@ class DeusDaemon:
 
     def status(self) -> dict:
         """Get current daemon status."""
+        auto_stop_at = self._status.auto_stop_at
+        remaining = max(0, auto_stop_at - time.time()) if auto_stop_at > 0 else 0
         return {
             "running": self._status.running,
             "pid": self._status.pid,
             "interval_seconds": self._status.interval_seconds,
             "started_at": self._status.started_at,
             "uptime_seconds": time.time() - self._status.started_at if self._status.started_at else 0,
+            "auto_stop_hours_remaining": round(remaining / 3600, 1) if remaining > 0 else 0,
+            "auto_stop_at": auto_stop_at,
             "cycle_count": self._status.cycle_count,
             "total_emails_sent": self._status.total_emails_sent,
             "total_replies_detected": self._status.total_replies_detected,

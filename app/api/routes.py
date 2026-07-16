@@ -909,6 +909,19 @@ def daemon_start():
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@router.post("/api/daemon/start-auto")
+def daemon_start_auto(request: dict = None):
+    """Start daemon with auto-stop after 24 hours (or custom hours)."""
+    hours = int(request.get("hours", 24)) if request else 24
+    try:
+        from daemon import get_daemon
+        d = get_daemon()
+        d.start(auto_stop_hours=hours)
+        return {"success": True, "message": f"Daemon started — will auto-stop in {hours} hours"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @router.post("/api/daemon/stop")
 def daemon_stop():
     try:
@@ -964,6 +977,20 @@ def email_rate_status():
         return limiter.get_all_status()
     except Exception:
         return {}
+
+
+@router.get("/api/email/stats/weekly")
+def email_weekly_stats():
+    try:
+        from email_stats import get_email_weekly_stats
+        stats = get_email_weekly_stats()
+        return {
+            "days": stats.get_weekly(),
+            "today": stats.get_today(),
+            "week_total": stats.get_week_total(),
+        }
+    except Exception as e:
+        return {"error": str(e)}
 
 
 @router.post("/api/email/verify")

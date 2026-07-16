@@ -634,6 +634,7 @@ No character limit." style="width:100%;font-family:Consolas,monospace;font-size:
         </div>
         <div class="row" style="margin-top:10px">
           <button onclick="daemonAction('start')" class="btn-green">Start</button>
+          <button onclick="daemonAction('start-auto')" class="btn-violet">Auto-Start (24h)</button>
           <button onclick="daemonAction('stop')" class="btn-red">Stop</button>
           <button onclick="daemonAction('restart')">Restart</button>
         </div>
@@ -677,6 +678,28 @@ No character limit." style="width:100%;font-family:Consolas,monospace;font-size:
         <h3>Rate Limiter</h3>
         <div class="row">
           <div id="del-rate-info" style="font-size:13px;color:var(--muted)">Loading...</div>
+        </div>
+      </div>
+      <div class="section">
+        <h3>Weekly Email Stats <span style="font-size:11px;color:var(--muted);font-weight:400">(rolling 7 days)</span></h3>
+        <div id="weekly-stats-wrap" style="font-size:12px;color:var(--muted)">
+          <table style="width:100%;border-collapse:collapse">
+            <thead><tr style="border-bottom:1px solid var(--border)">
+              <th style="text-align:left;padding:4px">Date</th>
+              <th style="text-align:right;padding:4px">Gmail API</th>
+              <th style="text-align:right;padding:4px">SMTP</th>
+              <th style="text-align:right;padding:4px">Resend</th>
+              <th style="text-align:right;padding:4px">Total</th>
+            </tr></thead>
+            <tbody id="weekly-stats-tbody"></tbody>
+            <tfoot><tr style="border-top:1px solid var(--border);font-weight:700;color:var(--cyan)">
+              <td style="text-align:left;padding:4px">Week Total</td>
+              <td style="text-align:right;padding:4px" id="week-total-gmail">0</td>
+              <td style="text-align:right;padding:4px" id="week-total-smtp">0</td>
+              <td style="text-align:right;padding:4px" id="week-total-resend">0</td>
+              <td style="text-align:right;padding:4px" id="week-total-all">0</td>
+            </tr></tfoot>
+          </table>
         </div>
       </div>
       <div class="section"><h3>Activity Log</h3><div class="log" id="del-log"></div></div>
@@ -1567,8 +1590,14 @@ function loadDaemon() {
     const pill = document.getElementById('daemon-status-pill');
     const info = document.getElementById('daemon-info');
     if (d.running) {
-      pill.innerHTML='<span class="pill pill-ok" style="font-size:14px;padding:4px 12px">RUNNING</span>';
-      info.textContent='Interval: '+d.interval_seconds+'s | Reply scan: every '+d.reply_scan_interval+'s';
+      let label = 'RUNNING';
+      let color = 'var(--green)';
+      if (d.auto_stop_hours_remaining > 0) {
+        label = 'AUTO ('+d.auto_stop_hours_remaining+'h left)';
+        color = 'var(--violet)';
+      }
+      pill.innerHTML='<span class="pill" style="font-size:14px;padding:4px 12px;background:'+color+'20;color:'+color+';border:1px solid '+color+'40">'+label+'</span>';
+      info.textContent='Interval: '+d.interval_seconds+'s | Cycle: '+d.cycle_count;
     } else {
       pill.innerHTML='<span class="pill pill-err" style="font-size:14px;padding:4px 12px">STOPPED</span>';
       info.textContent='Daemon is not running.';
@@ -1604,6 +1633,32 @@ function loadDeliverability() {
   fetch(API+'/api/email/rate-status').then(r=>r.json()).then(d=>{
     document.getElementById('del-rate-info').textContent = 'Daily: '+(d.daily_sent||0)+'/'+(d.daily_limit||0)+' | Hourly: '+(d.hourly_sent||0)+'/'+(d.hourly_limit||0)+' | Last delay: '+(d.last_delay_seconds||0).toFixed(0)+'s';
   });
+  loadWeeklyStats();
+}
+
+function loadWeeklyStats() {
+  fetch(API+'/api/email/stats/weekly').then(r=>r.json()).then(d=>{
+    const tbody = document.getElementById('weekly-stats-tbody');
+    if (!tbody) return;
+    tbody.innerHTML = '';
+    const days = d.days || [];
+    if (days.length === 0) {
+      tbody.innerHTML = '<tr><td colspan="5" style="text-align:center;padding:8px;color:var(--muted)">No data yet</td></tr>';
+      return;
+    }
+    let tg=0, ts=0, tr=0, ta=0;
+    days.forEach(day => {
+      tg += day.gmail_api||0;
+      ts += day.smtp||0;
+      tr += day.resend||0;
+      ta += day.total||0;
+      tbody.innerHTML += '<tr style="border-bottom:1px solid var(--border)"><td style="padding:4px">'+day.date+'</td><td style="text-align:right;padding:4px">'+(day.gmail_api||0)+'</td><td style="text-align:right;padding:4px">'+(day.smtp||0)+'</td><td style="text-align:right;padding:4px">'+(day.resend||0)+'</td><td style="text-align:right;padding:4px;color:var(--green)">'+(day.total||0)+'</td></tr>';
+    });
+    document.getElementById('week-total-gmail').textContent = tg;
+    document.getElementById('week-total-smtp').textContent = ts;
+    document.getElementById('week-total-resend').textContent = tr;
+    document.getElementById('week-total-all').textContent = ta;
+  }).catch(()=>{});
 }
 
 function verifyEmail() {

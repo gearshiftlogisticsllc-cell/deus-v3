@@ -199,6 +199,12 @@ class SendLimiter:
         limit.last_send_timestamp = time.time()
         self._save_state()
 
+        from email_stats import get_email_weekly_stats
+        try:
+            get_email_weekly_stats().record_send(method="gmail_api" if "gmail" in profile_name.lower() else profile_name)
+        except Exception:
+            pass
+
     def get_status(self, profile_name: str = "default") -> dict:
         """Get current send status for a profile."""
         limit = self._get_or_create(profile_name)
