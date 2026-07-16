@@ -797,7 +797,7 @@ function loadLeads() {
     const segments = d.segments || [];
     segments.forEach(seg => {
       total += seg.count;
-      const label = seg.lead_type === 'scraped' ? 'Scout (Agent)' : seg.lead_type === 'imported' ? 'Imported (Manual)' : (seg.lead_type || 'Unknown');
+      const label = seg.lead_type === 'scraped' ? 'Scout (Agent)' : seg.lead_type === 'imported' ? 'Imported (Manual)' : seg.lead_type === 'other' ? 'Other / Legacy' : (seg.lead_type || 'Unknown');
       html += '<div style="margin-bottom:16px">';
       html += '<h4 style="margin:0 0 4px 0">'+label+' <span style="color:var(--muted);font-weight:400">('+seg.count+' leads)</span></h4>';
       html += '<div class="tbl-wrap" style="max-height:250px"><table><thead><tr><th>Business</th><th>Email</th><th>Status</th><th>Date Added</th><th>Source</th></tr></thead><tbody>';
