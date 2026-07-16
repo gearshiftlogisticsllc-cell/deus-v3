@@ -610,11 +610,10 @@ def save_api_key(env_var: str, request: dict):
 
 @router.get("/api/leads/segmented")
 def leads_segmented():
-    """Return leads grouped by lead_type, from DB or leads.json fallback."""
+    """Return all leads from DB or leads.json, grouped by type."""
     try:
         from app.database import db_conn
-        segments = []
-        db_leads = []
+        all_leads = []
 
         try:
             with db_conn() as conn:
@@ -622,29 +621,47 @@ def leads_segmented():
                     """SELECT id, business_name, business_email, status, source, lead_type, created_at
                        FROM leads ORDER BY created_at DESC LIMIT 500"""
                 ).fetchall()
-                db_leads = [dict(r) for r in rows]
+                all_leads = [dict(r) for r in rows]
         except Exception:
-            db_leads = []
+            all_leads = []
 
-        if not db_leads:
-            db_leads = _load_json("leads.json")
+        if not all_leads:
+            raw = _load_json("leads.json")
+            all_leads = []
+            for l in raw:
+                if isinstance(l, dict):
+                    all_leads.append({
+                        "id": l.get("id", 0),
+                        "business_name": l.get("business_name", ""),
+                        "business_email": l.get("business_email", ""),
+                        "status": l.get("status", "new"),
+                        "source": l.get("source", "json"),
+                        "lead_type": l.get("lead_type", "scraped"),
+                        "created_at": l.get("created_at", 0),
+                    })
 
-        if db_leads:
-            grouped = {"imported": [], "scraped": [], "other": []}
-            for l in db_leads:
-                lt = (l.get("lead_type") or "").strip().lower()
-                if lt in ("imported", "scraped"):
-                    grouped[lt].append(l)
-                else:
-                    grouped["other"].append(l)
-            for key in ("imported", "scraped", "other"):
-                label = {"imported": "Imported (Manual)", "scraped": "Scout (Agent)", "other": "Other / Legacy"}[key]
-                leads = grouped[key][:200]
-                segments.append({"lead_type": key, "count": len(leads), "leads": leads,
-                                 "display_name": label})
+        segments = []
+        grouped = {"imported": [], "scraped": [], "other": []}
+        for l in all_leads:
+            lt = (l.get("lead_type") or "").strip().lower()
+            if lt == "imported":
+                grouped["imported"].append(l)
+            elif lt == "scraped":
+                grouped["scraped"].append(l)
+            else:
+                grouped["other"].append(l)
+
+        for key in ("imported", "scraped", "other"):
+            label = {"imported": "Imported (Manual)", "scraped": "Scout (Agent)", "other": "Other / Legacy"}[key]
+            leads = grouped[key][:200]
+            if leads:
+                segments.append({"lead_type": key, "count": len(leads), "leads": leads, "display_name": label})
+
+        if not segments:
+            return {"segments": [{"lead_type": "all", "count": 0, "leads": [], "display_name": "No Leads Found"}]}
         return {"segments": segments}
     except Exception as e:
-        return {"segments": [{"lead_type": "all", "count": 0, "leads": [], "error": str(e)}]}
+        return {"segments": [{"lead_type": "error", "count": 0, "leads": [], "display_name": f"Error: {e}"}]}
 
 
 # ---------------------------------------------------------------------------

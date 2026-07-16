@@ -788,40 +788,34 @@ refreshStats();
 
 // Leads view
 function loadLeads() {
-  fetch(API+'/api/leads/segmented').then(r=>r.json()).then(d=>{
-    const container = document.getElementById('leads-tables');
-    const summary = document.getElementById('leads-summary');
-    if (!container) return;
-    let html = '';
-    let total = 0;
-    const segments = d.segments || [];
-    segments.forEach(seg => {
-      total += seg.count;
-      const label = seg.display_name || seg.lead_type || 'Unknown';
+  const container = document.getElementById('leads-tables');
+  const summary = document.getElementById('leads-summary');
+  if (!container) return;
+  container.innerHTML = '<div class="spinner"></div>';
+  fetch(API+'/api/leads/segmented').then(function(r){ return r.json(); }).then(function(d){
+    var segments = d.segments || [];
+    var html = '';
+    var total = 0;
+    for (var si = 0; si < segments.length; si++) {
+      var seg = segments[si];
+      total += seg.count || 0;
       html += '<div style="margin-bottom:16px">';
-      html += '<h4 style="margin:0 0 4px 0">'+label+' <span style="color:var(--muted);font-weight:400">('+seg.count+' leads)</span></h4>';
+      html += '<h4 style="margin:0 0 4px 0">'+(seg.display_name||'Leads')+' <span style="color:var(--muted);font-weight:400">('+(seg.count||0)+' leads)</span></h4>';
       html += '<div class="tbl-wrap" style="max-height:250px"><table><thead><tr><th>Business</th><th>Email</th><th>Status</th><th>Date Added</th><th>Source</th></tr></thead><tbody>';
-      (seg.leads || []).forEach(l => {
-        const st = l.status||'new';
-        const stColor = st==='contacted'?'var(--cyan)':st==='send_failed'?'var(--red)':st==='replied'?'var(--green)':'var(--muted)';
-        const added = l.created_at ? new Date(l.created_at * 1000).toLocaleDateString() : '-';
+      var leads = seg.leads || [];
+      for (var li = 0; li < leads.length; li++) {
+        var l = leads[li];
+        var st = l.status||'new';
+        var stColor = st==='contacted'?'var(--cyan)':st==='send_failed'?'var(--red)':st==='replied'?'var(--green)':'var(--muted)';
+        var added = (l.created_at && l.created_at > 0) ? new Date(l.created_at * 1000).toLocaleDateString() : '-';
         html += '<tr><td>'+(l.business_name||'')+'</td><td>'+(l.business_email||'')+'</td><td><span style="color:'+stColor+'">'+st+'</span></td><td>'+added+'</td><td>'+(l.source||'-')+'</td></tr>';
-      });
+      }
       html += '</tbody></table></div></div>';
-    });
-    if (d.error && segments.length === 0) {
-      container.innerHTML = '<div class="pill pill-err">Error: '+d.error+'</div>';
-    } else {
-      container.innerHTML = html || '<div style="color:var(--muted)">No leads found in database</div>';
     }
-    if (segments.length > 0 && segments[0].error) {
-      summary.textContent = 'Error: '+segments[0].error;
-    } else {
-      summary.textContent = total+' total leads';
-    }
+    container.innerHTML = html || '<div style="color:var(--muted)">No leads found</div>';
+    summary.textContent = total > 0 ? total+' total leads' : '';
   }).catch(function(e) {
-    const container = document.getElementById('leads-tables');
-    if (container) container.innerHTML = '<div class="pill pill-err">Failed to load leads</div>';
+    container.innerHTML = '<div class="pill pill-err">Failed to load leads: '+(e.message||'unknown')+'</div>';
   });
 }
 
