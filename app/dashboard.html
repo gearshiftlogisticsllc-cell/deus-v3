@@ -186,7 +186,7 @@ tr:hover td{background:var(--panel2)}
     </div>
 
     <!-- LEADS -->
-    <div class="panel" id="panel-leads" style="display:none">
+    <div class="panel" id="panel-leads">
       <div class="panel-title">All Leads</div>
       <div class="panel-desc">View all leads segmented by origin (imported vs scout) with entry dates.</div>
       <div class="section">
@@ -788,11 +788,15 @@ refreshStats();
 
 // Leads view
 function loadLeads() {
-  const container = document.getElementById('leads-tables');
-  const summary = document.getElementById('leads-summary');
-  if (!container) return;
-  container.innerHTML = '<div class="spinner"></div>';
-  fetch(API+'/api/leads/segmented').then(function(r){ return r.json(); }).then(function(d){
+  var container = document.getElementById('leads-tables');
+  var summary = document.getElementById('leads-summary');
+  if (!container) { console.warn('loadLeads: #leads-tables not found'); return; }
+  container.innerHTML = '<span style="color:var(--cyan)">Loading leads...</span>';
+  var url = window.location.origin + '/api/leads/segmented';
+  fetch(url).then(function(r){
+    if (!r.ok) throw new Error('HTTP '+r.status);
+    return r.json();
+  }).then(function(d){
     var segments = d.segments || [];
     var html = '';
     var total = 0;
@@ -815,7 +819,8 @@ function loadLeads() {
     container.innerHTML = html || '<div style="color:var(--muted)">No leads found</div>';
     summary.textContent = total > 0 ? total+' total leads' : '';
   }).catch(function(e) {
-    container.innerHTML = '<div class="pill pill-err">Failed to load leads: '+(e.message||'unknown')+'</div>';
+    container.innerHTML = '<div class="pill pill-err">Failed: ' + e.message + ' — check console (F12)</div>';
+    console.error('loadLeads error:', e);
   });
 }
 
