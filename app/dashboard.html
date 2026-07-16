@@ -71,7 +71,7 @@ tr:hover td{background:var(--panel2)}
 <div class="topbar">
   <h1>DEUS 3.0</h1>
   <span class="badge">LIVE</span>
-  <button id="mode-toggle" onclick="toggleMode()" style="padding:3px 12px;font-size:11px;font-weight:700;border-radius:4px;border:none;cursor:pointer;transition:all .2s">Loading...</button>
+  <span class="pill pill-ok" style="font-size:11px;padding:2px 10px">PRODUCTION</span>
   <div class="right">
     <span><span class="dot"></span> Online</span>
     <span id="user-info" style="color:var(--cyan)">Loading...</span>
@@ -90,6 +90,7 @@ tr:hover td{background:var(--panel2)}
 <div class="main">
   <div class="sidebar" id="sidebar">
     <div class="nav-item active" onclick="showPanel('scout')" id="nav-scout"><span class="dot-s ok"></span> Lead Scout</div>
+    <div class="nav-item" onclick="showPanel('leads')" id="nav-leads"><span class="dot-s"></span> Leads</div>
     <div class="nav-item" onclick="showPanel('outreach')" id="nav-outreach"><span class="dot-s ok"></span> Outreach</div>
     <div class="nav-item" onclick="showPanel('followup')" id="nav-followup"><span class="dot-s"></span> Followup</div>
     <div class="nav-item" onclick="showPanel('replies')" id="nav-replies"><span class="dot-s"></span> Replies</div>
@@ -182,6 +183,19 @@ tr:hover td{background:var(--panel2)}
         </div>
       </div>
       <div class="section"><h3>Activity Log</h3><div class="log" id="scout-log"></div></div>
+    </div>
+
+    <!-- LEADS -->
+    <div class="panel" id="panel-leads" style="display:none">
+      <div class="panel-title">All Leads</div>
+      <div class="panel-desc">View all leads segmented by origin (imported vs scout) with entry dates.</div>
+      <div class="section">
+        <div class="row" style="margin-bottom:8px">
+          <button class="btn-green" onclick="exportLeadsCSV()">Export CSV</button>
+          <span id="leads-summary" style="font-size:12px;color:var(--muted);align-self:center"></span>
+        </div>
+        <div id="leads-tables"></div>
+      </div>
     </div>
 
     <!-- OUTREACH -->
@@ -726,6 +740,7 @@ function showPanel(name) {
   document.getElementById('nav-'+name).classList.add('active');
   // Load panel data on switch
   if (name==='scout') loadGeo();
+  if (name==='leads') loadLeads();
   if (name==='followup') loadCalendar();
   if (name==='daemon') loadDaemon();
   if (name==='deliverability') loadDeliverability();
@@ -771,44 +786,33 @@ function refreshStats() {
 setInterval(refreshStats, 10000);
 refreshStats();
 
-// Mode toggle
-function loadMode() {
-  fetch(API+'/api/mode').then(r=>r.json()).then(d=>{
-    const btn = document.getElementById('mode-toggle');
-    if (d.production) {
-      btn.textContent = 'PRODUCTION';
-      btn.style.background = 'var(--green)';
-      btn.style.color = '#000';
-    } else {
-      btn.textContent = 'TESTING';
-      btn.style.background = 'var(--amber)';
-      btn.style.color = '#000';
-    }
-  }).catch(()=>{
-    const btn = document.getElementById('mode-toggle');
-    btn.textContent = 'MODE ?';
-    btn.style.background = 'var(--muted)';
-    btn.style.color = '#000';
-  });
+// Leads view
+function loadLeads() {
+  fetch(API+'/api/leads/segmented').then(r=>r.json()).then(d=>{
+    const container = document.getElementById('leads-tables');
+    const summary = document.getElementById('leads-summary');
+    if (!container) return;
+    let html = '';
+    let total = 0;
+    const segments = d.segments || [];
+    segments.forEach(seg => {
+      total += seg.count;
+      const label = seg.lead_type === 'scraped' ? 'Scout (Agent)' : seg.lead_type === 'imported' ? 'Imported (Manual)' : (seg.lead_type || 'Unknown');
+      html += '<div style="margin-bottom:16px">';
+      html += '<h4 style="margin:0 0 4px 0">'+label+' <span style="color:var(--muted);font-weight:400">('+seg.count+' leads)</span></h4>';
+      html += '<div class="tbl-wrap" style="max-height:250px"><table><thead><tr><th>Business</th><th>Email</th><th>Status</th><th>Date Added</th><th>Source</th></tr></thead><tbody>';
+      (seg.leads || []).forEach(l => {
+        const st = l.status||'new';
+        const stColor = st==='contacted'?'var(--cyan)':st==='send_failed'?'var(--red)':st==='replied'?'var(--green)':'var(--muted)';
+        const added = l.created_at ? new Date(l.created_at * 1000).toLocaleDateString() : '-';
+        html += '<tr><td>'+(l.business_name||'')+'</td><td>'+(l.business_email||'')+'</td><td><span style="color:'+stColor+'">'+st+'</span></td><td>'+added+'</td><td>'+(l.source||'-')+'</td></tr>';
+      });
+      html += '</tbody></table></div></div>';
+    });
+    container.innerHTML = html || '<div style="color:var(--muted)">No leads found</div>';
+    summary.textContent = total+' total leads';
+  }).catch(()=>{});
 }
-function toggleMode() {
-  const btn = document.getElementById('mode-toggle');
-  const current = btn.textContent === 'PRODUCTION';
-  const newMode = !current;
-  btn.disabled = true;
-  btn.textContent = '...';
-  fetch(API+'/api/mode', {
-    method: 'POST',
-    headers: {'Content-Type':'application/json'},
-    body: JSON.stringify({production: newMode}),
-  }).then(r=>r.json()).then(d=>{
-    loadMode();
-  }).catch(()=>{
-    btn.textContent = current ? 'PRODUCTION' : 'TESTING';
-    btn.disabled = false;
-  }).finally(()=>{ btn.disabled = false; });
-}
-loadMode();
 
 // Lead Scout
 let scoutResults = [];

@@ -605,28 +605,27 @@ def save_api_key(env_var: str, request: dict):
 
 
 # ---------------------------------------------------------------------------
-# Mode Toggle (Testing / Production)
+# Leads Segmented View
 # ---------------------------------------------------------------------------
 
-@router.get("/api/mode")
-def get_mode():
-    """Get the current mode (testing/production) and its limits."""
+@router.get("/api/leads/segmented")
+def leads_segmented():
+    """Return leads grouped by lead_type (imported/scraped) with entry dates."""
     try:
-        from mode_config import mode_info
-        return mode_info()
+        from app.database import db_conn
+        segments = []
+        for lt in ("imported", "scraped"):
+            with db_conn() as conn:
+                rows = conn.execute(
+                    """SELECT id, business_name, business_email, status, source, lead_type, created_at
+                       FROM leads WHERE lead_type = ? ORDER BY created_at DESC LIMIT 200""",
+                    (lt,),
+                ).fetchall()
+            leads = [dict(r) for r in rows]
+            segments.append({"lead_type": lt, "count": len(leads), "leads": leads})
+        return {"segments": segments}
     except Exception as e:
-        return {"production": False, "mode_name": "Testing", "error": str(e)}
-
-
-@router.post("/api/mode")
-def set_mode(request: dict):
-    """Toggle between testing and production mode. Persists to mode_state.json."""
-    try:
-        from mode_config import set_mode as _set_mode, mode_info
-        _set_mode(request.get("production", False))
-        return mode_info()
-    except Exception as e:
-        return {"success": False, "error": str(e)}
+        return {"segments": [], "error": str(e)}
 
 
 # ---------------------------------------------------------------------------
