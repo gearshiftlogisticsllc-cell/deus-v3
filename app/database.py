@@ -63,6 +63,14 @@ else:
 
 
 def init_db():
+    """Initialize database — ORM tables + legacy SQLite/PG seeding."""
+    from app.db import init_orm, engine
+    try:
+        init_orm()
+    except Exception as e:
+        logger = __import__('logging').getLogger(__name__)
+        logger.warning("ORM init failed (continuing): %s", e)
+
     if _USE_PG:
         from app.db_adapter import init_pg_db
         init_pg_db()

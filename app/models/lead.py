@@ -1,0 +1,41 @@
+from sqlalchemy import Column, Integer, String, Float, Text
+from app.db import Base
+
+
+class Lead(Base):
+    __tablename__ = "leads"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    business_name = Column(String, default="")
+    owner_name = Column(String, default="")
+    business_email = Column(String, default="", index=True)
+    phone = Column(String, default="")
+    website = Column(String, default="")
+    address = Column(String, default="")
+    niche = Column(String, default="")
+    category = Column(String, default="")
+    services_offered = Column(Text, default="")
+    linkedin_url = Column(String, default="")
+    instagram_handle = Column(String, default="")
+    facebook_url = Column(String, default="")
+    source = Column(String, default="unknown")
+    status = Column(String, default="new", index=True)
+    outreach_ready = Column(Integer, default=0, index=True)
+    needs_human = Column(Integer, default=0)
+    needs_human_reason = Column(String, default="")
+    channel_used = Column(String, default="")
+    preferred_channel = Column(String, default="email")
+    score = Column(Integer, default=0)
+    notes = Column(Text, default="")
+    extra_json = Column(Text, default="")
+    first_contacted_at = Column(Float, nullable=True)
+    last_contacted_at = Column(Float, nullable=True)
+    contact_count = Column(Integer, default=0)
+    created_at = Column(Float, default=None)
+    updated_at = Column(Float, default=None)
+    lead_type = Column(String, default="cold", index=True)
+    import_batch_id = Column(String, default="")
+    import_filename = Column(String, default="")
+    email_verified = Column(Integer, default=0, index=True)
+    email_verified_at = Column(Float, nullable=True)
+    verification_method = Column(String, default="")

@@ -864,28 +864,55 @@ def manual_send_active():
 @router.get("/api/leads/list")
 def list_leads_db(status: str = None, lead_type: str = None,
                   limit: int = 500, offset: int = 0):
-    """List leads from the database."""
+    """List leads from the database. Uses ORM if available, falls back to legacy."""
     try:
-        from app.database import get_leads, count_leads
-        leads = get_leads(status=status, lead_type=lead_type, limit=limit, offset=offset)
-        total = count_leads(status=status)
-        return {"leads": leads, "total": total}
+        from app.db import SessionLocal
+        from app.repositories import LeadRepository
+        with SessionLocal() as session:
+            repo = LeadRepository(session)
+            leads_orm = repo.list_filtered(status=status, lead_type=lead_type, limit=limit, offset=offset)
+            total = repo.count_filtered(status=status)
+            # Convert ORM objects to dicts
+            leads_dict = []
+            for l in leads_orm:
+                d = {c.name: getattr(l, c.name) for c in l.__table__.columns}
+                leads_dict.append(d)
+            return {"leads": leads_dict, "total": total}
     except Exception:
-        return {"leads": [], "total": 0}
+        # Fallback to legacy
+        try:
+            from app.database import get_leads, count_leads
+            leads = get_leads(status=status, lead_type=lead_type, limit=limit, offset=offset)
+            total = count_leads(status=status)
+            return {"leads": leads, "total": total}
+        except Exception:
+            return {"leads": [], "total": 0}
 
 
 @router.get("/api/leads/count")
 def leads_count():
     try:
-        from app.database import count_leads
-        return {
-            "total": count_leads(),
-            "new": count_leads(status="new"),
-            "contacted": count_leads(status="contacted"),
-            "outreach_ready": count_leads(outreach_ready=True),
-        }
+        from app.db import SessionLocal
+        from app.repositories import LeadRepository
+        with SessionLocal() as session:
+            repo = LeadRepository(session)
+            return {
+                "total": repo.count_filtered(),
+                "new": repo.count_filtered(status="new"),
+                "contacted": repo.count_filtered(status="contacted"),
+                "outreach_ready": repo.count_filtered(outreach_ready=True),
+            }
     except Exception:
-        return {"total": 0, "new": 0, "contacted": 0, "outreach_ready": 0}
+        try:
+            from app.database import count_leads
+            return {
+                "total": count_leads(),
+                "new": count_leads(status="new"),
+                "contacted": count_leads(status="contacted"),
+                "outreach_ready": count_leads(outreach_ready=True),
+            }
+        except Exception:
+            return {"total": 0, "new": 0, "contacted": 0, "outreach_ready": 0}
 
 
 @router.post("/api/leads/check-contacted")
@@ -895,24 +922,37 @@ def check_leads_contacted(request: dict):
     if not emails:
         raise HTTPException(status_code=400, detail="emails list is required")
     try:
-        from app.database import is_email_already_contacted
-        contacted = {}
-        for email in emails:
-            contacted[email] = is_email_already_contacted(email)
-        return {"contacted": contacted}
+        from app.db import SessionLocal
+        from app.repositories import LeadRepository
+        with SessionLocal() as session:
+            repo = LeadRepository(session)
+            return {"contacted": {email: repo.is_contacted(email) for email in emails}}
     except Exception:
-        return {"contacted": {e: False for e in emails}}
+        try:
+            from app.database import is_email_already_contacted
+            return {"contacted": {email: is_email_already_contacted(email) for email in emails}}
+        except Exception:
+            return {"contacted": {e: False for e in emails}}
 
 
 @router.delete("/api/leads/{lead_id}")
 def delete_lead(lead_id: int):
     """Delete a single lead by ID."""
     try:
-        from app.database import delete_lead as _delete
-        _delete(lead_id)
-        return {"success": True, "deleted_id": lead_id}
+        from app.db import SessionLocal
+        from app.repositories import LeadRepository
+        with SessionLocal() as session:
+            repo = LeadRepository(session)
+            ok = repo.delete(lead_id)
+            session.commit()
+            return {"success": ok, "deleted_id": lead_id}
     except Exception as e:
-        return {"success": False, "error": str(e)}
+        try:
+            from app.database import delete_lead as _delete
+            _delete(lead_id)
+            return {"success": True, "deleted_id": lead_id}
+        except Exception:
+            return {"success": False, "error": str(e)}
 
 
 @router.post("/api/leads/bulk-delete")
@@ -922,14 +962,26 @@ def bulk_delete_leads(request: dict):
     if not ids:
         raise HTTPException(status_code=400, detail="ids list is required")
     try:
-        from app.database import delete_lead as _delete
+        from app.db import SessionLocal
+        from app.repositories import LeadRepository
         deleted = 0
-        for lid in ids:
-            _delete(lid)
-            deleted += 1
+        with SessionLocal() as session:
+            repo = LeadRepository(session)
+            for lid in ids:
+                if repo.delete(lid):
+                    deleted += 1
+            session.commit()
         return {"success": True, "deleted_count": deleted}
     except Exception as e:
-        return {"success": False, "error": str(e)}
+        try:
+            from app.database import delete_lead as _delete
+            deleted = 0
+            for lid in ids:
+                _delete(lid)
+                deleted += 1
+            return {"success": True, "deleted_count": deleted}
+        except Exception:
+            return {"success": False, "error": str(e)}
 
 
 # ---------------------------------------------------------------------------
