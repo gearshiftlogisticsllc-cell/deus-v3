@@ -417,7 +417,7 @@ def reset_daemon_configs():
             for e in entries:
                 session.delete(e)
             defaults = [
-                ("lead_scout", "Lead Scout", 1, "scraped", 0, "18:00", "Monday,Tuesday,Wednesday,Thursday,Friday,Saturday,Sunday", '{"niche":"","target":400,"auto_rotation":true}'),
+                ("lead_scout", "Lead Scout", 1, "scraped", 0, "", "", '{"niche":"Hvac companies hiring administrative roles","target":400,"auto_rotation":true}'),
                 ("outreach", "Outreach", 1, "scraped", 10, "", "", "{}"),
                 ("followup", "Followup", 1, "", 0, "", "", "{}"),
                 ("reply_scan", "Reply Scan", 1, "", 0, "", "", "{}"),

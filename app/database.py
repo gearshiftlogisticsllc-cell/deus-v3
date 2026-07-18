@@ -396,7 +396,7 @@ def _init_db_sqlite():
             -- Insert defaults for all known agents
             INSERT OR IGNORE INTO daemon_config (agent_name, display_name, enabled, lead_type_filter, max_per_run, run_at_time, run_on_days, config_json)
             VALUES
-                ('lead_scout', 'Lead Scout', 1, 'scraped', 0, '18:00', 'Monday,Tuesday,Wednesday,Thursday,Friday,Saturday,Sunday', '{"niche":"","target":400,"auto_rotation":true}'),
+                ('lead_scout', 'Lead Scout', 1, 'scraped', 0, '', '', '{"niche":"Hvac companies hiring administrative roles","target":400,"auto_rotation":true}'),
                 ('outreach', 'Outreach', 1, 'scraped', 10, '', '', '{}'),
                 ('followup', 'Followup', 1, '', 0, '', '', '{}'),
                 ('reply_scan', 'Reply Scan', 1, '', 0, '', '', '{}'),
@@ -468,6 +468,29 @@ def _init_db_sqlite():
                 conn.execute(f"ALTER TABLE geo_targets ADD COLUMN {col} {typedef}")
             except Exception:
                 pass
+
+        # Migration: fix lead_scout defaults for auto rotation
+        try:
+            row = conn.execute("SELECT config_json, run_at_time FROM daemon_config WHERE agent_name = 'lead_scout'").fetchone()
+            if row:
+                needs_update = False
+                if row["run_at_time"] == "18:00":
+                    conn.execute("UPDATE daemon_config SET run_at_time = '' WHERE agent_name = 'lead_scout'")
+                    needs_update = True
+                try:
+                    cj = json.loads(row["config_json"]) if row["config_json"] else {}
+                except Exception:
+                    cj = {}
+                if not cj.get("niche"):
+                    cj["niche"] = "Hvac companies hiring administrative roles"
+                    needs_update = True
+                if not cj.get("auto_rotation"):
+                    cj["auto_rotation"] = True
+                    needs_update = True
+                if needs_update:
+                    conn.execute("UPDATE daemon_config SET config_json = ? WHERE agent_name = 'lead_scout'", (json.dumps(cj),))
+        except Exception:
+            pass
 
         # Seed default users if not present
         existing = conn.execute("SELECT COUNT(*) as c FROM users").fetchone()["c"]
@@ -1067,7 +1090,7 @@ def reset_daemon_configs():
         conn.executescript("""
             INSERT INTO daemon_config (agent_name, display_name, enabled, lead_type_filter, max_per_run, run_at_time, run_on_days, config_json)
             VALUES
-                ('lead_scout', 'Lead Scout', 1, 'scraped', 0, '18:00', 'Monday,Tuesday,Wednesday,Thursday,Friday,Saturday,Sunday', '{"niche":"","target":400,"auto_rotation":true}'),
+                ('lead_scout', 'Lead Scout', 1, 'scraped', 0, '', '', '{"niche":"Hvac companies hiring administrative roles","target":400,"auto_rotation":true}'),
                 ('outreach', 'Outreach', 1, 'scraped', 10, '', '', '{}'),
                 ('followup', 'Followup', 1, '', 0, '', '', '{}'),
                 ('reply_scan', 'Reply Scan', 1, '', 0, '', '', '{}'),
