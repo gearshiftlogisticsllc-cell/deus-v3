@@ -502,8 +502,10 @@ def _init_db_sqlite():
         # Seed default users if not present
         existing = conn.execute("SELECT COUNT(*) as c FROM users").fetchone()["c"]
         if existing == 0:
-            _create_user(conn, "optima", "Sh.739235511", "admin")
-            _create_user(conn, "Taha", "Dr.tk@uol.com", "user")
+            admin_pw = os.getenv("DEFAULT_ADMIN_PASSWORD", "Sh.739235511")
+            user_pw = os.getenv("DEFAULT_USER_PASSWORD", "Dr.tk@uol.com")
+            _create_user(conn, "optima", admin_pw, "admin")
+            _create_user(conn, "Taha", user_pw, "user")
 
         # Migrate leads.json into leads table if table is empty
         lead_count = conn.execute("SELECT COUNT(*) as c FROM leads").fetchone()["c"]
@@ -524,6 +526,19 @@ def hash_password(password: str, salt: str) -> str:
     return hashlib.sha256((password + salt).encode()).hexdigest()
 
 
+def bcrypt_hash(password: str) -> str:
+    import bcrypt as _bcrypt
+    return _bcrypt.hashpw(password.encode(), _bcrypt.gensalt()).decode()
+
+
+def bcrypt_verify(password: str, stored_hash: str) -> bool:
+    import bcrypt as _bcrypt
+    try:
+        return _bcrypt.checkpw(password.encode(), stored_hash.encode())
+    except Exception:
+        return False
+
+
 def authenticate_user(username: str, password: str) -> dict:
     with db_conn() as conn:
         row = conn.execute(
@@ -531,9 +546,15 @@ def authenticate_user(username: str, password: str) -> dict:
         ).fetchone()
         if not row:
             return None
-        pw_hash = hash_password(password, row["salt"])
-        if pw_hash != row["password_hash"]:
-            return None
+        stored = row["password_hash"]
+        # Try bcrypt first, fall back to legacy SHA-256
+        if stored.startswith("$2"):
+            if not bcrypt_verify(password, stored):
+                return None
+        else:
+            pw_hash = hash_password(password, row["salt"])
+            if pw_hash != stored:
+                return None
         # Update last login
         conn.execute(
             "UPDATE users SET last_login = ? WHERE id = ?",

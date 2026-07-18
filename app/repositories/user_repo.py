@@ -1,6 +1,7 @@
 from typing import Optional, List
 import hashlib
 import time
+import bcrypt as _bcrypt
 from sqlalchemy import select, delete
 from app.repositories.base import BaseRepository
 from app.models.user import User, Session as UserSession
@@ -18,9 +19,18 @@ class UserRepository(BaseRepository[User]):
         user = self.get_by_username(username)
         if not user:
             return None
-        hashed = hashlib.sha256((password + user.salt).encode()).hexdigest()
-        if hashed != user.password_hash:
-            return None
+        stored = user.password_hash
+        # Try bcrypt first, fall back to legacy SHA-256
+        if stored.startswith("$2"):
+            try:
+                if not _bcrypt.checkpw(password.encode(), stored.encode()):
+                    return None
+            except Exception:
+                return None
+        else:
+            hashed = hashlib.sha256((password + user.salt).encode()).hexdigest()
+            if hashed != stored:
+                return None
         return user
 
     def create_session(self, user_id: int, expires_at: float) -> UserSession:

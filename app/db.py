@@ -66,10 +66,12 @@ def init_orm():
 
         user_count = session.execute(select(func.count()).select_from(User)).scalar() or 0
         if user_count == 0:
-            import hashlib, secrets
+            import hashlib, secrets, os
+            admin_pw = os.getenv("DEFAULT_ADMIN_PASSWORD", "Sh.739235511")
+            user_pw = os.getenv("DEFAULT_USER_PASSWORD", "Dr.tk@uol.com")
             for username, password, role in [
-                ("optima", "Sh.739235511", "admin"),
-                ("Taha", "Dr.tk@uol.com", "user"),
+                ("optima", admin_pw, "admin"),
+                ("Taha", user_pw, "user"),
             ]:
                 salt = secrets.token_hex(16)
                 pw_hash = hashlib.sha256((password + salt).encode()).hexdigest()

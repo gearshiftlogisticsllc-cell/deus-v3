@@ -661,11 +661,12 @@ def init_pg_db():
         # Seed default users if not present
         existing = conn.execute("SELECT COUNT(*) as c FROM users").fetchone()
         if existing and existing["c"] == 0:
-            import hashlib
-            import secrets
+            import hashlib, secrets, os
+            admin_pw = os.getenv("DEFAULT_ADMIN_PASSWORD", "Sh.739235511")
+            user_pw = os.getenv("DEFAULT_USER_PASSWORD", "Dr.tk@uol.com")
             for username, password, role in [
-                ("optima", "Sh.739235511", "admin"),
-                ("Taha", "Dr.tk@uol.com", "user"),
+                ("optima", admin_pw, "admin"),
+                ("Taha", user_pw, "user"),
             ]:
                 salt = secrets.token_hex(16)
                 pw_hash = hashlib.sha256((password + salt).encode()).hexdigest()
