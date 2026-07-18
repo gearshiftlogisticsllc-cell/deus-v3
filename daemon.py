@@ -75,6 +75,7 @@ class DeusDaemon:
         self._stop_event = threading.Event()
         self._callback: Optional[Callable] = None
         self._auto_stop_timer: Optional[threading.Thread] = None
+        self._scheduler: Optional[object] = None
 
         self._status = DaemonStatus(
             interval_seconds=self._interval,
@@ -108,7 +109,7 @@ class DeusDaemon:
                     CREATE INDEX IF NOT EXISTS idx_dl_cycle ON daemon_log(cycle_number);
                 """)
                 # Migration: add new columns if missing
-                for col in ["auto_outreach_sent", "appointment_checks", "deal_checks"]:
+                for col in ["auto_outreach_sent", "appointment_checks", "deal_checks", "leads_discovered"]:
                     try:
                         conn.execute(f"ALTER TABLE daemon_log ADD COLUMN {col} INTEGER DEFAULT 0")
                     except Exception:
@@ -155,6 +156,16 @@ class DeusDaemon:
             name="DEUS-Daemon",
         )
         self._thread.start()
+
+        # Also start the AgentScheduler so user-created schedules run
+        try:
+            from scheduler import get_scheduler
+            self._scheduler = get_scheduler()
+            self._scheduler.start()
+        except Exception as e:
+            logger.warning("AgentScheduler not started: %s", e)
+            self._scheduler = None
+
         logger.info("Daemon started (interval: %ds)", self._interval)
 
     def _auto_stop_waiter(self, seconds: float):
@@ -165,7 +176,14 @@ class DeusDaemon:
             self.stop()
 
     def stop(self):
-        """Stop the daemon background thread."""
+        """Stop the daemon background thread and AgentScheduler."""
+        if self._scheduler:
+            try:
+                self._scheduler.stop()
+            except Exception:
+                pass
+            self._scheduler = None
+
         self._running = False
         self._status.running = False
         self._status.auto_stop_at = 0
@@ -270,6 +288,21 @@ class DeusDaemon:
             followup_config = self._check_agent_config("followup")
             appointment_config = self._check_agent_config("appointment")
             deal_config = self._check_agent_config("deal_closer")
+            scout_config = self._check_agent_config("lead_scout")
+
+            # Task 0: Lead scout — discover new leads on user-defined schedule
+            if self._should_run(scout_config):
+                try:
+                    scout_result = self._run_lead_scout(scout_config)
+                    leads_discovered = scout_result.get("discovered", 0)
+                except Exception as e:
+                    leads_discovered = 0
+                    errors += 1
+                    error_msg = f"Lead scout: {e}"
+                    logger.error("Lead scout failed: %s", e)
+            else:
+                leads_discovered = 0
+                logger.debug("Lead scout skipped (disabled by config)")
 
             # Task 1: Auto-outreach for scout leads (lead_type='scraped')
             if self._should_run(outreach_config):
@@ -368,11 +401,12 @@ class DeusDaemon:
                 auto_outreach=auto_outreach,
                 appointment_checks=appointment_checks,
                 deal_checks=deal_checks,
+                leads_discovered=leads_discovered,
             )
 
             logger.info(
-                "--- Cycle #%d done (%.1fs): auto_outreach=%d, replies=%d, campaign=%d, followup=%d, appt=%d, deal=%d, errors=%d ---",
-                cycle_num, duration, auto_outreach, replies_found, campaign_emails,
+                "--- Cycle #%d done (%.1fs): scout=%d, outreach=%d, replies=%d, campaign=%d, followup=%d, appt=%d, deal=%d, errors=%d ---",
+                cycle_num, duration, leads_discovered, auto_outreach, replies_found, campaign_emails,
                 followup_emails, appointment_checks, deal_checks, errors,
             )
 
@@ -380,6 +414,7 @@ class DeusDaemon:
                 try:
                     self._callback({
                         "cycle": cycle_num,
+                        "leads_discovered": leads_discovered,
                         "auto_outreach": auto_outreach,
                         "replies": replies_found,
                         "campaign_sent": campaign_emails,
@@ -531,24 +566,56 @@ class DeusDaemon:
             logger.debug("Deal closer not available: %s", e)
             return {"checked": 0}
 
+    def _run_lead_scout(self, config: dict) -> dict:
+        """Run lead scout to discover new leads on schedule."""
+        try:
+            from lead_scout_agent import LeadScoutAgent, LLM, DuckDuckGoSource, DirectWebSource
+            lead_type = config.get("lead_type_filter", "") or "scraped"
+            max_per_run = config.get("max_per_run", 0) or 5
+            cfg_json = config.get("config_json", {})
+            agent = LeadScoutAgent()
+            result = agent.run(
+                mode="auto_scout",
+                lead_type=lead_type,
+                limit=max_per_run,
+                niche=cfg_json.get("niche", ""),
+                location=cfg_json.get("location", ""),
+            )
+            discovered = result.stats.get("leads_found", 0) if hasattr(result, "stats") else 0
+            return {"discovered": discovered}
+        except ImportError:
+            logger.debug("lead_scout_agent not available")
+            return {"discovered": 0}
+        except Exception as e:
+            logger.error("Lead scout run error: %s", e)
+            return {"discovered": 0}
+
     # ------------------------------------------------------------------
     # Logging
     # ------------------------------------------------------------------
 
     def _log_cycle(self, cycle_num, replies_found, leads_marked,
                    campaign_emails, followup_emails, errors, error_msg, duration,
-                   auto_outreach=0, appointment_checks=0, deal_checks=0):
+                   auto_outreach=0, appointment_checks=0, deal_checks=0,
+                   leads_discovered=0):
         """Record cycle results in daemon_log table."""
         try:
             from app.database import db_conn
+            # Ensure column exists (safe to call every time)
+            with db_conn() as conn:
+                try:
+                    conn.execute("ALTER TABLE daemon_log ADD COLUMN leads_discovered INTEGER DEFAULT 0")
+                except Exception:
+                    pass
             with db_conn() as conn:
                 conn.execute(
                     """INSERT INTO daemon_log
                        (cycle_number, started_at, completed_at, replies_found,
                         leads_marked, campaign_emails_sent, followup_emails_sent,
                         errors, error_message, duration_seconds,
-                        auto_outreach_sent, appointment_checks, deal_checks)
-                       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                        auto_outreach_sent, appointment_checks, deal_checks,
+                        leads_discovered)
+                       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                     (
                         cycle_num,
                         time.time() - duration,
@@ -563,6 +630,7 @@ class DeusDaemon:
                         auto_outreach,
                         appointment_checks,
                         deal_checks,
+                        leads_discovered,
                     ),
                 )
 
