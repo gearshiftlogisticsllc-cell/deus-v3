@@ -83,8 +83,27 @@ class GeoTargetUpdateRequest(BaseModel):
 # AUTH
 # ===========================================================================
 
+# Simple in-memory rate limiter: {ip: [(timestamp,), ...]}
+_login_attempts: dict[str, list[float]] = {}
+LOGIN_RATE_LIMIT = 5
+LOGIN_RATE_WINDOW = 900  # 15 minutes
+
+
+def _check_login_rate(ip: str):
+    now = time.time()
+    attempts = _login_attempts.get(ip, [])
+    # Prune old entries
+    attempts = [t for t in attempts if now - t < LOGIN_RATE_WINDOW]
+    if len(attempts) >= LOGIN_RATE_LIMIT:
+        raise HTTPException(status_code=429, detail="Too many login attempts. Try again later.")
+    attempts.append(now)
+    _login_attempts[ip] = attempts
+
+
 @router.post("/api/auth/login")
 def login(request: LoginRequest, response: Response):
+    client_ip = request.client.host if request.client else "unknown"
+    _check_login_rate(client_ip)
     try:
         from app.db import SessionLocal
         from app.repositories import UserRepository
