@@ -1343,8 +1343,10 @@ def lead_scout_status(job_id: str):
 # ===========================================================================
 
 @router.get("/api/config/keys")
-def get_config_keys():
+def get_config_keys(req: Request):
     try:
+        from app.auth import require_admin as _require_admin
+        _require_admin(req)
         from api_key_registry import get_agents_grouped
         grouped = get_agents_grouped()
         result = {}

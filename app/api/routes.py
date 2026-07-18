@@ -13,7 +13,7 @@ from typing import Optional, Dict
 
 logger = logging.getLogger(__name__)
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import StreamingResponse
 
 # Ensure project root is on sys.path
@@ -558,8 +558,10 @@ def import_contacts(request: dict):
 
 
 @router.get("/api/config/keys")
-def get_api_keys():
+def get_api_keys(req: Request):
     try:
+        from app.auth import require_admin as _require_admin
+        _require_admin(req)
         from api_key_registry import get_agents_grouped
         grouped = get_agents_grouped()
         result = {}
