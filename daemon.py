@@ -692,13 +692,18 @@ class DeusDaemon:
             if auto_rotation and auto_niche:
                 from app.database import (
                     ensure_lead_scout_rotation, get_next_scout_state,
-                    update_scout_state, complete_scout_cycle, upsert_lead
+                    update_scout_state, complete_scout_cycle,
+                    is_state_completed_today, upsert_lead
                 )
                 from lead_scout_agent import LeadScoutAgent, LLM, DuckDuckGoSource, DirectWebSource
 
                 ensure_lead_scout_rotation(target_per_state=target_per_run)
 
-                # Check if auto cycle is fully done — if so, reset and stop for today
+                # One state per day: if a state was already completed today, stop
+                if is_state_completed_today():
+                    logger.debug("Auto scout: one state already completed today — skipping")
+                    return {"discovered": total_discovered, "state_done": True}
+
                 state = get_next_scout_state()
                 if not state:
                     complete_scout_cycle()

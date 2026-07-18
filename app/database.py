@@ -451,6 +451,7 @@ def _init_db_sqlite():
                 leads_collected INTEGER DEFAULT 0,
                 target_per_state INTEGER DEFAULT 400,
                 completed INTEGER DEFAULT 0,
+                completed_date TEXT DEFAULT '',
                 cycle_id INTEGER DEFAULT 1,
                 last_run_at REAL DEFAULT 0,
                 created_at REAL DEFAULT (strftime('%s','now'))
@@ -489,6 +490,12 @@ def _init_db_sqlite():
                     needs_update = True
                 if needs_update:
                     conn.execute("UPDATE daemon_config SET config_json = ? WHERE agent_name = 'lead_scout'", (json.dumps(cj),))
+        except Exception:
+            pass
+
+        # Migration: add completed_date column to lead_scout_rotation
+        try:
+            conn.execute("ALTER TABLE lead_scout_rotation ADD COLUMN completed_date TEXT DEFAULT ''")
         except Exception:
             pass
 
@@ -1266,7 +1273,9 @@ def get_next_scout_state(cycle_id: int = None) -> dict:
 def update_scout_state(state_id: int, leads_added: int, state_code: str = None):
     """Update leads collected. If >= target, mark completed and check for full cycle."""
     import time
+    from datetime import datetime
     now = time.time()
+    today = datetime.now().strftime("%Y-%m-%d")
     with db_conn() as conn:
         row = conn.execute("SELECT * FROM lead_scout_rotation WHERE id = ?", (state_id,)).fetchone()
         if not row:
@@ -1274,9 +1283,23 @@ def update_scout_state(state_id: int, leads_added: int, state_code: str = None):
         new_total = row["leads_collected"] + leads_added
         completed = 1 if new_total >= row["target_per_state"] else 0
         conn.execute(
-            "UPDATE lead_scout_rotation SET leads_collected = ?, completed = ?, last_run_at = ? WHERE id = ?",
-            (new_total, completed, now, state_id),
+            "UPDATE lead_scout_rotation SET leads_collected = ?, completed = ?, completed_date = ?, last_run_at = ? WHERE id = ?",
+            (new_total, completed, today if completed else row.get("completed_date", ""), now, state_id),
         )
+
+
+def is_state_completed_today(cycle_id: int = None) -> bool:
+    """Check if any state was already completed today (one state per day rule)."""
+    from datetime import datetime
+    today = datetime.now().strftime("%Y-%m-%d")
+    with db_conn() as conn:
+        if cycle_id is None:
+            cycle_id = conn.execute("SELECT MAX(cycle_id) as c FROM lead_scout_rotation").fetchone()["c"] or 1
+        row = conn.execute(
+            "SELECT COUNT(*) as c FROM lead_scout_rotation WHERE completed = 1 AND completed_date = ? AND cycle_id = ?",
+            (today, cycle_id),
+        ).fetchone()
+        return row and row["c"] > 0
 
 
 def get_scout_rotation_status() -> dict:
