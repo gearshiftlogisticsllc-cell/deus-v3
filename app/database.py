@@ -435,8 +435,8 @@ def _init_db_sqlite():
             CREATE INDEX IF NOT EXISTS idx_liq_lead ON linkedin_queue(lead_id);
         """)
 
-        # Gmail API token (persists across Railway restarts)
-        conn.execute("""
+        # Gmail API token + lead scout state rotation (persists across Railway restarts)
+        conn.executescript("""
             CREATE TABLE IF NOT EXISTS gmail_tokens (
                 id INTEGER PRIMARY KEY CHECK (id = 1),
                 token_json TEXT NOT NULL,
@@ -444,7 +444,6 @@ def _init_db_sqlite():
                 updated_at REAL DEFAULT (strftime('%s','now'))
             );
 
-            -- Lead Scout state rotation for auto mode
             CREATE TABLE IF NOT EXISTS lead_scout_rotation (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 state_code TEXT NOT NULL,
