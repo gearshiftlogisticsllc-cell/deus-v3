@@ -1771,6 +1771,11 @@ function loadDaemonConfigs() {
       html += '<div class="field" style="flex:.2"><label>Run At Time</label><input type="time" id="drt-'+cfg.agent_name+'" value="'+(cfg.run_at_time||'')+'" onchange="saveDaemonAgent(\''+cfg.agent_name+'\')" title="Leave empty = every cycle"></div>';
       html += '<div class="field" style="flex:.25"><label>Days (comma)</label><input type="text" id="drd-'+cfg.agent_name+'" value="'+(cfg.run_on_days||'')+'" placeholder="Mon,Wed,Fri" onchange="saveDaemonAgent(\''+cfg.agent_name+'\')" style="font-size:11px"></div>';
       html += '</div>';
+      var cj = cfg.config_json||{};
+      html += '<div class="row" style="margin-top:4px">';
+      html += '<div class="field" style="flex:.5"><label>Niche Filter</label><input type="text" id="dnc-'+cfg.agent_name+'" value="'+(cj.niche||'')+'" placeholder="e.g. HVAC, dental" onchange="saveDaemonAgent(\''+cfg.agent_name+'\')" style="font-size:11px"></div>';
+      html += '<div class="field" style="flex:.5"><label>Location Filter</label><input type="text" id="dloc-'+cfg.agent_name+'" value="'+(cj.location||'')+'" placeholder="e.g. Virginia" onchange="saveDaemonAgent(\''+cfg.agent_name+'\')" style="font-size:11px"></div>';
+      html += '</div>';
       html += '</div>';
       html += '</div>';
     });
@@ -1797,6 +1802,8 @@ function saveDaemonAgent(name) {
   var maxPerRun = parseInt((document.getElementById('dmr-'+name) && document.getElementById('dmr-'+name).value) || 0);
   var runAtTime = (document.getElementById('drt-'+name) && document.getElementById('drt-'+name).value) || '';
   var runOnDays = (document.getElementById('drd-'+name) && document.getElementById('drd-'+name).value) || '';
+  var niche = (document.getElementById('dnc-'+name) && document.getElementById('dnc-'+name).value) || '';
+  var location = (document.getElementById('dloc-'+name) && document.getElementById('dloc-'+name).value) || '';
 
   fetch(API+'/api/daemon/config/'+name, {
     method:'POST', headers:{'Content-Type':'application/json'},
@@ -1806,6 +1813,7 @@ function saveDaemonAgent(name) {
       max_per_run: maxPerRun,
       run_at_time: runAtTime,
       run_on_days: runOnDays,
+      config_json: { niche: niche, location: location },
     })
   }).then(r=>r.json()).then(function(d) {
     if (d.success) {

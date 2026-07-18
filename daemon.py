@@ -309,7 +309,7 @@ class DeusDaemon:
                 try:
                     lead_type = outreach_config.get("lead_type_filter", "scraped") or None
                     max_per_run = outreach_config.get("max_per_run", 10) or 10
-                    outreach_result = self._auto_outreach_scout(lead_type=lead_type, limit=max_per_run)
+                    outreach_result = self._auto_outreach_scout(lead_type=lead_type, limit=max_per_run, config=outreach_config)
                     auto_outreach = outreach_result.get("sent", 0)
                     self._status.total_emails_sent += auto_outreach
                 except Exception as e:
@@ -524,7 +524,7 @@ class DeusDaemon:
             logger.error("Follow-up sending error: %s", e)
             return {"sent": 0}
 
-    def _auto_outreach_scout(self, lead_type: str = None, limit: int = 10) -> dict:
+    def _auto_outreach_scout(self, lead_type: str = None, limit: int = 10, config: dict = None) -> dict:
         """Auto-send outreach to leads. Uses lead_type filter from daemon config."""
         from outreach_agent import manual_send_active
         if manual_send_active:
@@ -537,8 +537,27 @@ class DeusDaemon:
             if not candidates:
                 logger.info("Auto-outreach: no candidates found (type=%s, limit=%d)", lead_type or "all", limit)
                 return {"sent": 0}
+            # Filter by niche/location from config_json if set
+            if config:
+                cfg_json = config.get("config_json", {})
+                niche_filter = (cfg_json.get("niche", "") or "").strip().lower()
+                location_filter = (cfg_json.get("location", "") or "").strip().lower()
+                if niche_filter or location_filter:
+                    filtered = []
+                    for c in candidates:
+                        lead_niche = (c.get("niche") or "").strip().lower()
+                        lead_loc = (c.get("location") or c.get("address") or "").strip().lower()
+                        if niche_filter and niche_filter not in lead_niche:
+                            continue
+                        if location_filter and location_filter not in lead_loc:
+                            continue
+                        filtered.append(c)
+                    candidates = filtered
+                    if not candidates:
+                        logger.info("Auto-outreach: no candidates after niche/location filter")
+                        return {"sent": 0}
             agent = OutreachAgent()
-            result = agent.run(mode="auto_scout", limit=limit, channel="email", lead_type=lead_type)
+            result = agent.run(mode="auto_scout", limit=len(candidates), channel="email", lead_type=lead_type)
             return {"sent": result.stats.get("auto_sent", 0)}
         except Exception as e:
             logger.error("Auto-outreach error: %s", e)
@@ -567,28 +586,104 @@ class DeusDaemon:
             return {"checked": 0}
 
     def _run_lead_scout(self, config: dict) -> dict:
-        """Run lead scout to discover new leads on schedule."""
+        """Run lead scout to discover new leads on schedule.
+        
+        Two sources:
+          1. Daemon config: niche/location from config_json
+          2. Geo targets: due entries (matching day/time) from geo_targets table
+        """
+        total_discovered = 0
+        from datetime import datetime
+        today_name = datetime.now().strftime("%A")
+        current_time = datetime.now().strftime("%H:%M")
+
+        # Source 1: Run direct scout from daemon config niche/location
         try:
-            from lead_scout_agent import LeadScoutAgent, LLM, DuckDuckGoSource, DirectWebSource
-            lead_type = config.get("lead_type_filter", "") or "scraped"
-            max_per_run = config.get("max_per_run", 0) or 5
             cfg_json = config.get("config_json", {})
-            agent = LeadScoutAgent()
-            result = agent.run(
-                mode="auto_scout",
-                lead_type=lead_type,
-                limit=max_per_run,
-                niche=cfg_json.get("niche", ""),
-                location=cfg_json.get("location", ""),
-            )
-            discovered = result.stats.get("leads_found", 0) if hasattr(result, "stats") else 0
-            return {"discovered": discovered}
+            niche = cfg_json.get("niche", "").strip()
+            location = cfg_json.get("location", "").strip()
+            direct_count = int(config.get("max_per_run", 0) or 5)
+            if niche:
+                from lead_scout_agent import LeadScoutAgent, LLM, DuckDuckGoSource, DirectWebSource
+                ddg = DuckDuckGoSource()
+                direct = DirectWebSource()
+                sources = []
+                if ddg.enabled: sources.append(ddg)
+                if direct.enabled: sources.append(direct)
+                llm = LLM()
+                agent = LeadScoutAgent(None, None, llm)
+                query = f"{niche} in {location}" if location else niche
+                result = agent.run(user_input=query, target=direct_count)
+                if result.success and result.data:
+                    from app.database import upsert_lead
+                    saved = 0
+                    for lead in result.data:
+                        lead["lead_type"] = "scraped"
+                        lead["source"] = "daemon_scout"
+                        try:
+                            upsert_lead(lead)
+                            saved += 1
+                        except Exception:
+                            pass
+                    total_discovered += saved
+                    logger.info("Lead scout (config): niche='%s' location='%s' saved=%d", niche, location, saved)
         except ImportError:
-            logger.debug("lead_scout_agent not available")
-            return {"discovered": 0}
+            logger.debug("lead_scout_agent not available for config scout")
         except Exception as e:
-            logger.error("Lead scout run error: %s", e)
-            return {"discovered": 0}
+            logger.error("Lead scout config error: %s", e)
+
+        # Source 2: Run due geo targets (match by day OR date + time)
+        try:
+            from app.database import db_conn
+            today_date = datetime.now().strftime("%Y-%m-%d")
+            with db_conn() as conn:
+                due = conn.execute(
+                    """SELECT * FROM geo_targets
+                       WHERE enabled = 1
+                       AND scheduled_time <= ?
+                       AND (scheduled_day = ? OR scheduled_day = '' OR scheduled_day IS NULL)
+                       AND (scheduled_date = ? OR scheduled_date = '' OR scheduled_date IS NULL)""",
+                    (current_time, today_name, today_date),
+                ).fetchall()
+            if due:
+                from lead_scout_agent import LeadScoutAgent, LLM, DuckDuckGoSource, DirectWebSource
+                ddg = DuckDuckGoSource()
+                direct = DirectWebSource()
+                sources = []
+                if ddg.enabled: sources.append(ddg)
+                if direct.enabled: sources.append(direct)
+                llm = LLM()
+                agent = LeadScoutAgent(None, None, llm)
+                cfg_json = config.get("config_json", {})
+                niche = cfg_json.get("niche", "").strip()
+                for target in due:
+                    t = dict(target)
+                    try:
+                        location_parts = [p for p in [t.get("city"), t.get("state"), t.get("country")] if p]
+                        query = f"{niche} in {', '.join(location_parts)}" if niche else ", ".join(location_parts)
+                        if not query:
+                            continue
+                        result = agent.run(user_input=query, target=cfg_json.get("target", 50))
+                        if result.success and result.data:
+                            from app.database import upsert_lead
+                            geo_saved = 0
+                            for lead in result.data:
+                                lead["lead_type"] = "scraped"
+                                lead["source"] = "geo_auto_scout"
+                                lead["address"] = lead.get("address", "") or query
+                                try:
+                                    upsert_lead(lead)
+                                    geo_saved += 1
+                                except Exception:
+                                    pass
+                            total_discovered += geo_saved
+                            logger.info("Lead scout (geo): target=%d state=%s saved=%d", t["id"], t.get("state",""), geo_saved)
+                    except Exception as e:
+                        logger.error("Geo target %d scout error: %s", t.get("id","?"), e)
+        except Exception as e:
+            logger.error("Lead scout geo targets error: %s", e)
+
+        return {"discovered": total_discovered}
 
     # ------------------------------------------------------------------
     # Logging
