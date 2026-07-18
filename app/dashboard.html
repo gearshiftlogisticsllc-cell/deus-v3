@@ -1459,10 +1459,10 @@ function loadReplyStatus() {
   fetch(API+'/api/replies/status').then(r=>r.json()).then(d=>{
     const el = document.getElementById('reply-status');
     let html = '';
-    html += '<span class="pill '+(d.imap_configured?'pill-ok':'pill-err')+'">'+(d.imap_configured?'IMAP Connected':'IMAP Not Configured')+'</span> ';
+    html += '<span class="pill '+(d.gmail_configured?'pill-ok':'pill-err')+'">'+(d.gmail_configured?'Gmail Connected':'Gmail Not Configured')+'</span> ';
     html += '<span style="margin-left:10px">Replied: <b style="color:var(--green)">'+d.leads_replied+'</b></span> ';
     html += '<span style="margin-left:10px">Contacted: <b style="color:var(--cyan)">'+d.leads_contacted+'</b></span>';
-    if (d.imap_email) html += '<span style="margin-left:10px;color:var(--muted)">('+d.imap_email+' @ '+d.imap_host+')</span>';
+    if (d.last_check_id) html += '<span style="margin-left:10px;color:var(--muted)">last_email_id: '+d.last_check_id+'</span>';
     el.innerHTML = html;
   }).catch(()=>{ document.getElementById('reply-status').innerHTML='<span class="pill pill-err">Error loading status</span>'; });
 }
