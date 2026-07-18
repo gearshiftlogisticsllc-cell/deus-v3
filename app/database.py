@@ -1,44 +1,76 @@
 """
-app/database.py — DEUS 3.0 SQL Database Layer
-==============================================
-SQLite for user auth, sessions, pending changes, email tracking, PDF rules.
-Can migrate to PostgreSQL later by changing the connection string.
+app/database.py — DEUS 3.0 Database Layer
+==========================================
+SQLite by default. Set DATABASE_URL env var to switch to PostgreSQL
+(all 50+ functions work unchanged via db_adapter.py).
 """
 
 import os
-import sqlite3
+import json
+import time
 import hashlib
 import secrets
-import time
-import json
 from contextlib import contextmanager
 
-DB_PATH = os.path.join(os.path.dirname(os.path.dirname(__file__)), "deus.db")
-# Use Railway volume for persistence if available
-_VOLUME_PATH = os.getenv("RAILWAY_VOLUME_MOUNT_PATH") or os.getenv("RAILWAY_VOLUME_PATH", "")
-if _VOLUME_PATH:
-    DB_PATH = os.path.join(_VOLUME_PATH, "deus.db")
+# ---------------------------------------------------------------------------
+# Backend selection — DATABASE_URL triggers PostgreSQL mode
+# ---------------------------------------------------------------------------
+_DATABASE_URL = os.getenv("DATABASE_URL", "").strip()
+_USE_PG = bool(_DATABASE_URL)
 
+if _USE_PG:
+    import logging
+    logger = logging.getLogger(__name__)
 
-def get_db():
-    conn = sqlite3.connect(DB_PATH)
-    conn.row_factory = sqlite3.Row
-    conn.execute("PRAGMA journal_mode=WAL")
-    conn.execute("PRAGMA foreign_keys=ON")
-    return conn
+    def get_db():
+        from app.db_adapter import PgConnection
+        return PgConnection(_DATABASE_URL)
 
+    @contextmanager
+    def db_conn():
+        from app.db_adapter import pg_conn
+        with pg_conn() as conn:
+            yield conn
 
-@contextmanager
-def db_conn():
-    conn = get_db()
-    try:
-        yield conn
-        conn.commit()
-    finally:
-        conn.close()
+    # All functions below use db_conn() internally — they work unchanged.
+    # The adapter rewrites SQL (?→%s), handles lastrowid (RETURNING id),
+    # and converts INSERT OR REPLACE/IGNORE to ON CONFLICT syntax.
+
+else:
+    import sqlite3
+
+    DB_PATH = os.path.join(os.path.dirname(os.path.dirname(__file__)), "deus.db")
+    _VOLUME_PATH = os.getenv("RAILWAY_VOLUME_MOUNT_PATH") or os.getenv("RAILWAY_VOLUME_PATH", "")
+    if _VOLUME_PATH:
+        DB_PATH = os.path.join(_VOLUME_PATH, "deus.db")
+
+    def get_db():
+        conn = sqlite3.connect(DB_PATH)
+        conn.row_factory = sqlite3.Row
+        conn.execute("PRAGMA journal_mode=WAL")
+        conn.execute("PRAGMA foreign_keys=ON")
+        return conn
+
+    @contextmanager
+    def db_conn():
+        conn = get_db()
+        try:
+            yield conn
+            conn.commit()
+        finally:
+            conn.close()
+
 
 
 def init_db():
+    if _USE_PG:
+        from app.db_adapter import init_pg_db
+        init_pg_db()
+    else:
+        _init_db_sqlite()
+
+
+def _init_db_sqlite():
     with db_conn() as conn:
         conn.executescript("""
             CREATE TABLE IF NOT EXISTS users (
