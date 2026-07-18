@@ -1008,27 +1008,58 @@ def _migrate_leads_json(conn):
 # Gmail Token persistence (DB-backed, survives Railway restarts)
 # ---------------------------------------------------------------------------
 
+def _encrypt_token(plain: str) -> str:
+    if not plain:
+        return ""
+    import base64, hashlib
+    from cryptography.fernet import Fernet
+    key = os.getenv("SMTP_ENCRYPTION_KEY", "")
+    if not key:
+        seed = os.getenv("SMTP_PASSWORD", "deus-default-seed")
+        key = base64.urlsafe_b64encode(hashlib.sha256(seed.encode()).digest())
+    return Fernet(key).encrypt(plain.encode()).decode()
+
+
+def _decrypt_token(cipher: str) -> str:
+    if not cipher:
+        return ""
+    try:
+        import base64, hashlib
+        from cryptography.fernet import Fernet
+        key = os.getenv("SMTP_ENCRYPTION_KEY", "")
+        if not key:
+            seed = os.getenv("SMTP_PASSWORD", "deus-default-seed")
+            key = base64.urlsafe_b64encode(hashlib.sha256(seed.encode()).digest())
+        return Fernet(key).decrypt(cipher.encode()).decode()
+    except Exception:
+        return ""
+
+
 def save_gmail_token(token_json: str, sender_email: str = ""):
-    """Upsert the Gmail API OAuth token into the database."""
+    """Upsert the Gmail API OAuth token into the database (encrypted at rest)."""
+    encrypted = _encrypt_token(token_json)
     with db_conn() as conn:
         existing = conn.execute("SELECT id FROM gmail_tokens WHERE id = 1").fetchone()
         if existing:
             conn.execute(
                 "UPDATE gmail_tokens SET token_json = ?, sender_email = ?, updated_at = ? WHERE id = 1",
-                (token_json, sender_email, time.time()),
+                (encrypted, sender_email, time.time()),
             )
         else:
             conn.execute(
                 "INSERT INTO gmail_tokens (id, token_json, sender_email, updated_at) VALUES (1, ?, ?, ?)",
-                (token_json, sender_email, time.time()),
+                (encrypted, sender_email, time.time()),
             )
 
 
 def get_gmail_token() -> str | None:
-    """Return the stored Gmail token JSON, or None if not configured."""
+    """Return the stored Gmail token JSON (decrypted), or None if not configured."""
     with db_conn() as conn:
         row = conn.execute("SELECT token_json FROM gmail_tokens WHERE id = 1").fetchone()
-        return row["token_json"] if row else None
+        if not row:
+            return None
+        decrypted = _decrypt_token(row["token_json"])
+        return decrypted if decrypted else row["token_json"]
 
 
 def delete_gmail_token():

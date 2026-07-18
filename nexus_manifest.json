@@ -91,7 +91,6 @@
       "report_agent": "always"
     }
   },
-  "install_path": "F:\\deus v3.0",
   "llm_providers": {
     "primary": "groq",
     "fallback": "gemini",

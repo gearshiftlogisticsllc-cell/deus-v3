@@ -19,7 +19,8 @@ from dotenv import load_dotenv
 
 from rules_engine import get_rules_context
 
-load_dotenv()
+if not os.getenv("GROQ_API_KEY"):
+    load_dotenv()
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
 logger = logging.getLogger(__name__)

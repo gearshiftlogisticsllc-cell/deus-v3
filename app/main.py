@@ -20,7 +20,9 @@ except ImportError:
 
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.middleware.trustedhost import TrustedHostMiddleware
 from fastapi.responses import HTMLResponse, RedirectResponse
+from starlette.middleware.base import BaseHTTPMiddleware
 
 from app.api.auth_routes import router as auth_router
 from app.api.lead_routes import router as lead_router
@@ -41,6 +43,18 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+class HTTPSRedirectMiddleware(BaseHTTPMiddleware):
+    async def dispatch(self, request: Request, call_next):
+        if os.getenv("ENFORCE_HTTPS", "").lower() in ("1", "true", "yes"):
+            if request.url.scheme != "https" and request.headers.get("x-forwarded-proto") != "https":
+                url = request.url.replace(scheme="https")
+                return RedirectResponse(url=str(url), status_code=301)
+        return await call_next(request)
+
+
+app.add_middleware(HTTPSRedirectMiddleware)
 
 app.include_router(auth_router)
 app.include_router(lead_router)
