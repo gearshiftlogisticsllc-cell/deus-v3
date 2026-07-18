@@ -1055,6 +1055,125 @@ def reset_daemon_configs():
 
 
 # ---------------------------------------------------------------------------
+# LinkedIn Outreach Queue
+# ---------------------------------------------------------------------------
+
+@router.get("/api/linkedin/queue")
+def list_linkedin_queue(status: str = None, limit: int = 100):
+    """Get LinkedIn outreach queue entries."""
+    try:
+        from app.database import get_linkedin_queue, count_linkedin_queue
+        entries = get_linkedin_queue(status=status or None, limit=limit)
+        counts = {
+            "total": count_linkedin_queue(),
+            "pending": count_linkedin_queue("pending"),
+            "connection_sent": count_linkedin_queue("connection_sent"),
+            "message_sent": count_linkedin_queue("message_sent"),
+            "replied": count_linkedin_queue("replied"),
+        }
+        return {"entries": entries, "counts": counts}
+    except Exception as e:
+        return {"entries": [], "counts": {}, "error": str(e)}
+
+
+@router.post("/api/linkedin/queue/add")
+def add_to_linkedin_queue(request: dict):
+    """Add a lead to the LinkedIn outreach queue."""
+    try:
+        from app.database import add_to_linkedin_queue as db_add
+        entry_id = db_add(request, request.get("message_template", ""))
+        return {"success": bool(entry_id), "id": entry_id}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.put("/api/linkedin/queue/{entry_id}")
+def update_linkedin_entry(entry_id: int, request: dict):
+    """Update a LinkedIn queue entry (status, notes, message)."""
+    try:
+        from app.database import update_linkedin_queue
+        update_linkedin_queue(entry_id, request)
+        return {"success": True}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.delete("/api/linkedin/queue/{entry_id}")
+def delete_linkedin_entry(entry_id: int):
+    """Delete a LinkedIn queue entry."""
+    try:
+        from app.database import delete_linkedin_entry
+        delete_linkedin_entry(entry_id)
+        return {"success": True}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/api/linkedin/queue/bulk-delete")
+def bulk_delete_linkedin(request: dict):
+    """Delete multiple LinkedIn queue entries."""
+    ids = request.get("ids", [])
+    if not ids:
+        raise HTTPException(status_code=400, detail="ids is required")
+    try:
+        from app.database import delete_linkedin_entry
+        for eid in ids:
+            delete_linkedin_entry(eid)
+        return {"deleted": len(ids)}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/api/linkedin/export")
+def export_linkedin_csv(status: str = None):
+    """Export LinkedIn queue as CSV (Dux-Soup compatible format)."""
+    try:
+        from app.database import export_linkedin_csv as gen_csv
+        csv_text = gen_csv(status=status or None)
+        return StreamingResponse(
+            io.BytesIO(csv_text.encode("utf-8")),
+            media_type="text/csv",
+            headers={"Content-Disposition": f"attachment; filename=linkedin_queue.csv"},
+        )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/api/linkedin/queue/bulk-add")
+def bulk_add_to_linkedin(request: dict):
+    """Bulk-add leads from DB to LinkedIn queue by lead_type or specific IDs."""
+    try:
+        from app.database import db_conn, add_to_linkedin_queue as db_add
+        lead_type = request.get("lead_type", "")
+        lead_ids = request.get("lead_ids", [])
+        message_template = request.get("message_template", "")
+        added = 0
+
+        if lead_ids:
+            placeholders = ",".join("?" * len(lead_ids))
+            with db_conn() as conn:
+                rows = conn.execute(
+                    f"SELECT * FROM leads WHERE id IN ({placeholders})", lead_ids
+                ).fetchall()
+                for row in rows:
+                    if db_add(dict(row), message_template):
+                        added += 1
+        elif lead_type:
+            with db_conn() as conn:
+                rows = conn.execute(
+                    "SELECT * FROM leads WHERE lead_type = ? AND (linkedin_url IS NOT NULL AND linkedin_url != '')",
+                    (lead_type,),
+                ).fetchall()
+                for row in rows:
+                    if db_add(dict(row), message_template):
+                        added += 1
+
+        return {"success": True, "added": added}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ---------------------------------------------------------------------------
 # Email Deliverability
 # ---------------------------------------------------------------------------
 

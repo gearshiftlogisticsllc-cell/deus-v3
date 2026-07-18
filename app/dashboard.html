@@ -94,6 +94,7 @@ tr:hover td{background:var(--panel2)}
     <div class="nav-item" onclick="showPanel('outreach')" id="nav-outreach"><span class="dot-s ok"></span> Outreach</div>
     <div class="nav-item" onclick="showPanel('followup')" id="nav-followup"><span class="dot-s"></span> Followup</div>
     <div class="nav-item" onclick="showPanel('replies')" id="nav-replies"><span class="dot-s"></span> Replies</div>
+    <div class="nav-item" onclick="showPanel('linkedin')" id="nav-linkedin"><span class="dot-s"></span> LinkedIn</div>
     <div class="nav-item" onclick="showPanel('appointment')" id="nav-appointment"><span class="dot-s"></span> Appointment</div>
     <div class="nav-item" onclick="showPanel('closer')" id="nav-closer"><span class="dot-s"></span> Deal Closer</div>
     <div class="nav-item" onclick="showPanel('report')" id="nav-report"><span class="dot-s"></span> Report</div>
@@ -447,6 +448,53 @@ No character limit." style="width:100%;font-family:Consolas,monospace;font-size:
       <div class="section"><h3>Activity Log</h3><div class="log" id="reply-log"></div></div>
     </div>
 
+    <!-- LINKEDIN OUTREACH QUEUE -->
+    <div class="panel" id="panel-linkedin">
+      <div class="panel-title">LinkedIn Outreach Queue</div>
+      <div class="panel-desc">Leads with LinkedIn profiles are queued here for export to your third-party automation tool (Dux-Soup, Expandi, etc.). No credentials needed — safe and compliant.</div>
+      <div class="section">
+        <h3>Queue Summary</h3>
+        <div class="row">
+          <div class="stat-chip" style="flex:1;text-align:center"><div style="font-size:22px;font-weight:700;color:#0A66C2" id="li-total">0</div><div style="font-size:11px;color:var(--muted)">Total</div></div>
+          <div class="stat-chip" style="flex:1;text-align:center"><div style="font-size:22px;font-weight:700;color:var(--muted)" id="li-pending">0</div><div style="font-size:11px;color:var(--muted)">Pending</div></div>
+          <div class="stat-chip" style="flex:1;text-align:center"><div style="font-size:22px;font-weight:700;color:var(--cyan)" id="li-conn-sent">0</div><div style="font-size:11px;color:var(--muted)">Conn Sent</div></div>
+          <div class="stat-chip" style="flex:1;text-align:center"><div style="font-size:22px;font-weight:700;color:var(--violet)" id="li-msg-sent">0</div><div style="font-size:11px;color:var(--muted)">Msg Sent</div></div>
+          <div class="stat-chip" style="flex:1;text-align:center"><div style="font-size:22px;font-weight:700;color:var(--green)" id="li-replied">0</div><div style="font-size:11px;color:var(--muted)">Replied</div></div>
+        </div>
+      </div>
+      <div class="section">
+        <h3>Bulk Add Leads to Queue</h3>
+        <div class="row">
+          <div class="field" style="flex:.3"><label>Lead Type</label><select id="li-bulk-type"><option value="">All</option><option value="scraped">Scout Leads</option><option value="imported">Imported Leads</option></select></div>
+          <div class="field" style="flex:.5"><label>Default Message Template (optional)</label><input type="text" id="li-msg-tmpl" placeholder="Hi {first_name}, I came across your profile..."></div>
+          <button onclick="bulkAddLinkedIn()" class="btn-violet">Add to Queue</button>
+          <span id="li-bulk-status" style="font-size:12px;color:var(--muted)"></span>
+        </div>
+      </div>
+      <div class="section">
+        <div class="row">
+          <div class="field" style="flex:.2"><label>Filter Status</label><select id="li-filter" onchange="loadLinkedIn()"><option value="">All</option><option value="pending">Pending</option><option value="connection_sent">Connection Sent</option><option value="message_sent">Message Sent</option><option value="replied">Replied</option></select></div>
+          <button onclick="exportLinkedInCSV()" class="btn-green">📥 Export CSV (Dux-Soup)</button>
+          <button onclick="loadLinkedIn()" style="background:var(--violet);color:var(--bg);border:none;padding:6px 12px;border-radius:6px;font-size:12px;cursor:pointer">Refresh</button>
+          <span id="li-count" style="font-size:12px;color:var(--muted)"></span>
+        </div>
+        <div class="tbl-wrap" style="max-height:400px">
+          <table><thead><tr>
+            <th>Name</th><th>Email</th><th>LinkedIn URL</th><th>Title</th><th>Company</th><th>Status</th><th>Message</th><th>Date</th><th></th>
+          </tr></thead><tbody id="li-tbody"></tbody></table>
+        </div>
+      </div>
+      <div class="section"><h3>How it works</h3>
+        <div style="font-size:13px;color:var(--muted);line-height:1.6">
+          <b style="color:var(--cyan)">1.</b> Lead Scout finds leads with LinkedIn URLs → they appear here.<br>
+          <b style="color:var(--cyan)">2.</b> Review the queue, export as CSV, or use bulk-add for existing leads.<br>
+          <b style="color:var(--cyan)">3.</b> Import the CSV into <b>Dux-Soup</b>, <b>Expandi</b>, or <b>Linked Helper</b> for safe automated outreach.<br>
+          <b style="color:var(--cyan)">4.</b> Update status here after your tool processes them.
+        </div>
+      </div>
+      <div class="section"><h3>Activity Log</h3><div class="log" id="li-log"></div></div>
+    </div>
+
     <!-- APPOINTMENT -->
     <div class="panel" id="panel-appointment">
       <div class="panel-title">Appointment Agent</div>
@@ -755,6 +803,7 @@ function showPanel(name) {
   if (name==='scout') loadGeo();
   if (name==='leads') loadLeads();
   if (name==='followup') loadCalendar();
+  if (name==='linkedin') loadLinkedIn();
   if (name==='daemon') loadDaemon();
   if (name==='deliverability') loadDeliverability();
 }
@@ -1950,6 +1999,104 @@ function renderGeoResults(leads) {
   });
   document.getElementById('geo-results-tbody').innerHTML = html || '<tr><td colspan="4" style="color:var(--muted)">No results</td></tr>';
   document.getElementById('geo-results-section').style.display = '';
+}
+
+// ========== LINKEDIN OUTREACH QUEUE ==========
+function loadLinkedIn() {
+  var status = document.getElementById('li-filter') ? document.getElementById('li-filter').value : '';
+  var url = API+'/api/linkedin/queue?limit=200' + (status ? '&status='+status : '');
+  fetch(url).then(function(r) { return r.json(); }).then(function(d) {
+    // Update counts
+    var counts = d.counts || {};
+    document.getElementById('li-total').textContent = counts.total || 0;
+    document.getElementById('li-pending').textContent = counts.pending || 0;
+    document.getElementById('li-conn-sent').textContent = counts.connection_sent || 0;
+    document.getElementById('li-msg-sent').textContent = counts.message_sent || 0;
+    document.getElementById('li-replied').textContent = counts.replied || 0;
+
+    var entries = d.entries || [];
+    document.getElementById('li-count').textContent = entries.length + ' entries';
+    var tb = document.getElementById('li-tbody');
+    if (!tb) return;
+    tb.innerHTML = '';
+    entries.forEach(function(e) {
+      var st = e.status || 'pending';
+      var stColor = st === 'replied' ? 'var(--green)' : st === 'message_sent' ? 'var(--violet)' : st === 'connection_sent' ? 'var(--cyan)' : 'var(--muted)';
+      var added = e.created_at ? new Date(e.created_at * 1000).toLocaleDateString() : '-';
+      var note = (e.message_personalized || e.message_template || '').substring(0, 50);
+      tb.innerHTML += '<tr>' +
+        '<td><b>'+(e.lead_name||'')+'</b></td>' +
+        '<td style="color:var(--violet);font-size:12px">'+(e.lead_email||'')+'</td>' +
+        '<td><a href="'+(e.linkedin_url||'')+'" target="_blank" style="color:var(--cyan);font-size:12px">Profile</a></td>' +
+        '<td style="font-size:12px;color:var(--muted)">'+(e.profile_title||'')+'</td>' +
+        '<td style="font-size:12px">'+(e.company||'')+'</td>' +
+        '<td><span style="color:'+stColor+'">'+st+'</span></td>' +
+        '<td style="font-size:11px;color:var(--muted)">'+note+'</td>' +
+        '<td style="font-size:11px;color:var(--muted)">'+added+'</td>' +
+        '<td><select onchange="updateLinkedInStatus('+e.id+',this.value)" style="font-size:10px;padding:2px;background:var(--bg);border:1px solid var(--border);color:var(--text);border-radius:3px">' +
+          '<option value="">—</option>' +
+          '<option value="connection_sent">Conn Sent</option>' +
+          '<option value="message_sent">Msg Sent</option>' +
+          '<option value="replied">Replied</option>' +
+          '<option value="pending">Reset Pending</option>' +
+        '</select></td>' +
+        '<td><button onclick="deleteLinkedInEntry('+e.id+',\''+(e.lead_name||'')+'\')" style="background:var(--red);color:#fff;border:none;padding:2px 6px;border-radius:3px;cursor:pointer;font-size:10px">✕</button></td>' +
+      '</tr>';
+    });
+    if (!entries.length) {
+      tb.innerHTML = '<tr><td colspan="10" style="text-align:center;color:var(--muted);padding:16px">No LinkedIn leads in queue. Run Lead Scout with LinkedIn capture enabled.</td></tr>';
+    }
+  }).catch(function(e) {
+    var tb = document.getElementById('li-tbody');
+    if (tb) tb.innerHTML = '<tr><td colspan="10" class="pill pill-err">Error: '+e.message+'</td></tr>';
+  });
+}
+
+function updateLinkedInStatus(id, status) {
+  if (!status) return;
+  fetch(API+'/api/linkedin/queue/'+id, {
+    method:'PUT', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({status: status})
+  }).then(function(r) { return r.json(); }).then(function(d) {
+    if (d.success) { log('li-log', 'Updated #'+id+' → '+status, 'ok'); loadLinkedIn(); }
+  }).catch(function(e) { log('li-log', 'Update failed: '+e, 'err'); });
+}
+
+function deleteLinkedInEntry(id, name) {
+  if (!confirm('Delete "'+name+'" from queue?')) return;
+  fetch(API+'/api/linkedin/queue/'+id, {method:'DELETE'}).then(function(r) { return r.json(); }).then(function(d) {
+    if (d.success) { log('li-log', 'Deleted #'+id+' ('+name+')', 'ok'); loadLinkedIn(); }
+  }).catch(function(e) { log('li-log', 'Delete failed: '+e, 'err'); });
+}
+
+function bulkAddLinkedIn() {
+  var leadType = document.getElementById('li-bulk-type').value;
+  var msgTmpl = document.getElementById('li-msg-tmpl').value;
+  var status = document.getElementById('li-bulk-status');
+  status.innerHTML = '<span class="spinner"></span> Adding...';
+  fetch(API+'/api/linkedin/queue/bulk-add', {
+    method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({lead_type: leadType, message_template: msgTmpl})
+  }).then(function(r) { return r.json(); }).then(function(d) {
+    if (d.success) {
+      status.innerHTML = '<span class="pill pill-ok">Added '+d.added+'</span>';
+      log('li-log', 'Added '+d.added+' leads to LinkedIn queue', 'ok');
+      loadLinkedIn();
+    } else {
+      status.innerHTML = '<span class="pill pill-err">Failed</span>';
+    }
+  }).catch(function(e) { status.innerHTML = '<span class="pill pill-err">'+e.message+'</span>'; });
+}
+
+function exportLinkedInCSV() {
+  fetch(API+'/api/linkedin/export').then(function(r) {
+    if (!r.ok) throw new Error('No data');
+    return r.blob();
+  }).then(function(b) {
+    var a = document.createElement('a'); a.href = URL.createObjectURL(b);
+    a.download = 'linkedin_queue.csv'; a.click();
+    log('li-log', 'CSV exported for Dux-Soup/Expandi import.', 'ok');
+  }).catch(function(e) { log('li-log', 'Export failed: '+e, 'err'); });
 }
 
 // ========== GOOGLE OAUTH (Gmail API) ==========

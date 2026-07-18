@@ -364,6 +364,35 @@ def init_db():
                 ('report', 'Report Agent', 1, '', 0);
         """)
 
+        # LinkedIn outreach queue
+        conn.executescript("""
+            CREATE TABLE IF NOT EXISTS linkedin_queue (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                lead_id INTEGER,
+                lead_name TEXT DEFAULT '',
+                lead_email TEXT DEFAULT '',
+                linkedin_url TEXT DEFAULT '',
+                profile_title TEXT DEFAULT '',
+                company TEXT DEFAULT '',
+                industry TEXT DEFAULT '',
+                location TEXT DEFAULT '',
+                niche TEXT DEFAULT '',
+                message_template TEXT DEFAULT '',
+                message_personalized TEXT DEFAULT '',
+                status TEXT DEFAULT 'pending',
+                connection_sent_at REAL,
+                message_sent_at REAL,
+                replied_at REAL,
+                notes TEXT,
+                source TEXT DEFAULT 'scout',
+                created_at REAL DEFAULT (strftime('%s','now')),
+                updated_at REAL DEFAULT (strftime('%s','now')),
+                FOREIGN KEY (lead_id) REFERENCES leads(id)
+            );
+            CREATE INDEX IF NOT EXISTS idx_liq_status ON linkedin_queue(status);
+            CREATE INDEX IF NOT EXISTS idx_liq_lead ON linkedin_queue(lead_id);
+        """)
+
         # Gmail API token (persists across Railway restarts)
         conn.execute("""
             CREATE TABLE IF NOT EXISTS gmail_tokens (
@@ -992,3 +1021,111 @@ def reset_daemon_configs():
                 ('deal_closer', 'Deal Closer', 1, '', 0),
                 ('report', 'Report Agent', 1, '', 0);
         """)
+
+
+# ---------------------------------------------------------------------------
+# LinkedIn Outreach Queue
+# ---------------------------------------------------------------------------
+
+def add_to_linkedin_queue(lead: dict, message_template: str = "") -> int:
+    """Add a lead to the LinkedIn outreach queue. Returns queue entry ID."""
+    with db_conn() as conn:
+        linkedin_url = lead.get("linkedin_url") or lead.get("linkedin", "")
+        if not linkedin_url:
+            return 0
+        existing = conn.execute(
+            "SELECT id FROM linkedin_queue WHERE linkedin_url = ?", (linkedin_url,)
+        ).fetchone()
+        if existing:
+            return existing["id"]
+        cur = conn.execute(
+            """INSERT INTO linkedin_queue
+               (lead_id, lead_name, lead_email, linkedin_url, profile_title, company,
+                industry, location, niche, message_template, status, source)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?)""",
+            (
+                lead.get("id"),
+                lead.get("business_name", ""),
+                lead.get("business_email", ""),
+                linkedin_url,
+                lead.get("profile_title", ""),
+                lead.get("company", ""),
+                lead.get("industry", ""),
+                lead.get("location", "") or lead.get("address", ""),
+                lead.get("niche", ""),
+                message_template,
+                lead.get("source", "scout"),
+            ),
+        )
+        return cur.lastrowid
+
+
+def get_linkedin_queue(status: str = None, limit: int = 100) -> list[dict]:
+    """Get LinkedIn queue entries, optionally filtered by status."""
+    with db_conn() as conn:
+        query = "SELECT * FROM linkedin_queue WHERE 1=1"
+        params = []
+        if status:
+            query += " AND status = ?"
+            params.append(status)
+        query += " ORDER BY created_at DESC LIMIT ?"
+        params.append(limit)
+        rows = conn.execute(query, params).fetchall()
+        return [dict(r) for r in rows]
+
+
+def update_linkedin_queue(entry_id: int, updates: dict):
+    """Update a LinkedIn queue entry."""
+    with db_conn() as conn:
+        sets = []
+        vals = []
+        for field in ("status", "message_template", "message_personalized",
+                      "connection_sent_at", "message_sent_at", "replied_at", "notes"):
+            if field in updates:
+                sets.append(f"{field} = ?")
+                vals.append(updates[field])
+        if sets:
+            import time
+            sets.append("updated_at = ?")
+            vals.append(time.time())
+            vals.append(entry_id)
+            conn.execute(f"UPDATE linkedin_queue SET {', '.join(sets)} WHERE id = ?", vals)
+
+
+def delete_linkedin_entry(entry_id: int):
+    """Delete a LinkedIn queue entry."""
+    with db_conn() as conn:
+        conn.execute("DELETE FROM linkedin_queue WHERE id = ?", (entry_id,))
+
+
+def count_linkedin_queue(status: str = None) -> int:
+    """Count LinkedIn queue entries."""
+    with db_conn() as conn:
+        query = "SELECT COUNT(*) as c FROM linkedin_queue WHERE 1=1"
+        params = []
+        if status:
+            query += " AND status = ?"
+            params.append(status)
+        return conn.execute(query, params).fetchone()["c"]
+
+
+def export_linkedin_csv(status: str = None) -> str:
+    """Generate CSV text for LinkedIn queue export (Dux-Soup compatible format)."""
+    entries = get_linkedin_queue(status=status, limit=10000)
+    import csv, io
+    output = io.StringIO()
+    writer = csv.writer(output)
+    writer.writerow(["First Name", "Last Name", "Email", "Company", "Position",
+                      "Industry", "Location", "LinkedIn URL", "Personalized Note", "Status"])
+    for e in entries:
+        name_parts = (e.get("lead_name") or "").strip().split(" ", 1)
+        first = name_parts[0] if name_parts else ""
+        last = name_parts[1] if len(name_parts) > 1 else ""
+        note = e.get("message_personalized") or e.get("message_template") or ""
+        writer.writerow([
+            first, last, e.get("lead_email", ""), e.get("company", ""),
+            e.get("profile_title", ""), e.get("industry", ""),
+            e.get("location", ""), e.get("linkedin_url", ""),
+            note, e.get("status", "pending"),
+        ])
+    return output.getvalue()

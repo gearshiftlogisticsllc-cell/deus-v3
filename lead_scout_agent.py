@@ -1213,6 +1213,23 @@ class LeadScoutAgent(BaseAgent):
                 logger.warning("LLM snippet enrich returned no usable JSON for chunk starting at %d.", start)
         return leads
 
+    def push_to_linkedin_queue(self, leads: List[dict], message_template: str = "") -> int:
+        """Push leads with LinkedIn URLs into the linkedin_queue for third-party tool processing."""
+        queued = 0
+        try:
+            from app.database import add_to_linkedin_queue
+            for lead in leads:
+                li_url = lead.get("linkedin_url") or lead.get("linkedin", "")
+                if li_url:
+                    lead["source"] = lead.get("source", "scout")
+                    if add_to_linkedin_queue(lead, message_template):
+                        queued += 1
+            if queued:
+                logger.info("Pushed %d leads with LinkedIn URLs to queue.", queued)
+        except Exception as e:
+            logger.warning("Failed to push to LinkedIn queue: %s", e)
+        return queued
+
     def run(self, **kwargs) -> AgentResult:
         start = time.time()
         user_input = kwargs.get("user_input", "")
@@ -1238,12 +1255,18 @@ class LeadScoutAgent(BaseAgent):
         leads = self._llm_snippet_enrich(leads, user_input)
         leads = self.score_batch(leads, user_input)
 
+        # Auto-push LinkedIn URLs to queue if requested
+        if kwargs.get("push_linkedin", False):
+            template = kwargs.get("linkedin_message_template", "")
+            self.push_to_linkedin_queue(leads, message_template=template)
+
         duration = time.time() - start
         stats = {
             "total_leads": len(leads),
             "with_email": sum(1 for l in leads if l.get("business_email")),
             "with_phone": sum(1 for l in leads if l.get("phone")),
             "with_owner": sum(1 for l in leads if l.get("owner_name")),
+            "linkedin_queued": sum(1 for l in leads if l.get("linkedin_url") or l.get("linkedin")),
         }
         return make_result(True, f"Collected {len(leads)} leads.",
                           data=leads, stats=stats, duration=duration)
