@@ -116,9 +116,11 @@ def login(request: LoginRequest, response: Response):
         except Exception as e:
             raise HTTPException(status_code=500, detail=f"Login failed: {e}")
 
+    is_https = request.url.scheme == "https"
     response.set_cookie(
         key="deus_session", value=token,
         httponly=True, max_age=86400, samesite="lax",
+        secure=is_https,
     )
     return {"success": True, "user": {"username": username, "role": role}}
 

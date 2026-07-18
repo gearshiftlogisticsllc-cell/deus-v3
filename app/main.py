@@ -36,7 +36,7 @@ app = FastAPI(
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=os.getenv("CORS_ORIGINS", "https://deus-v3-production.up.railway.app").split(","),
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

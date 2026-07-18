@@ -1352,12 +1352,13 @@ def get_config_keys():
             result[agent_name] = []
             for ki in keys:
                 val = os.getenv(ki.env_var, "")
+                from api_key_registry import mask_value as _mask_key
                 result[agent_name].append({
                     "env_var": ki.env_var, "required": ki.required,
                     "is_secret": ki.is_secret, "provider": ki.provider,
                     "provider_url": ki.provider_url, "used_by": ki.used_by,
                     "value_set": bool(val),
-                    "value_masked": (ki.mask_value(val) if val and ki.is_secret else val) if hasattr(ki, 'mask_value') else val,
+                    "value_masked": _mask_key(val) if val and ki.is_secret else val,
                 })
         return result
     except Exception:
@@ -1365,7 +1366,9 @@ def get_config_keys():
 
 
 @router.post("/api/config/keys/{env_var}")
-def save_config_key(env_var: str, request: dict):
+def save_config_key(env_var: str, request: dict, req: Request):
+    from app.auth import require_admin as _require_admin
+    _require_admin(req)
     value = request.get("value", "")
     env_path = os.path.join(DATA_DIR, ".env")
     lines, replaced = [], False
