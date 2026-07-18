@@ -312,6 +312,20 @@ class DeusDaemon:
                     error_msg = f"Auto-outreach: {e}"
                     logger.error("Auto-outreach failed: %s", e)
 
+            # Task 7: Lead Scout rotation — one state per day at 12 PM, 400 leads
+            now = datetime.now()
+            if now.hour == 12 and now.minute < 10:
+                try:
+                    scout_result = self._run_lead_scout_rotation()
+                    leads_discovered = scout_result.get("discovered", 0)
+                except Exception as e:
+                    leads_discovered = 0
+                    errors += 1
+                    error_msg = f"Lead scout rotation: {e}"
+                    logger.error("Lead scout rotation failed: %s", e)
+            else:
+                leads_discovered = 0
+
             duration = time.time() - cycle_start
             self._status.last_cycle_at = time.time()
             if errors > 0:
@@ -512,6 +526,84 @@ class DeusDaemon:
         except Exception as e:
             logger.debug("Deal closer not available: %s", e)
             return {"checked": 0}
+
+    def _run_lead_scout_rotation(self) -> dict:
+        """Run lead scout rotation — one state per day at 12 PM, 400 leads.
+        Uses rotation DB table; reads niche from env or rotation defaults.
+        """
+        try:
+            from app.database import (
+                ensure_lead_scout_rotation, get_next_scout_state,
+                update_scout_state, complete_scout_cycle,
+                is_state_completed_today, upsert_lead
+            )
+            from lead_scout_agent import LeadScoutAgent, LLM, DuckDuckGoSource, DirectWebSource
+
+            niche = os.getenv("LEAD_SCOUT_NICHE", "").strip()
+            target = int(os.getenv("LEAD_SCOUT_TARGET", "400"))
+            if not niche:
+                logger.warning("LEAD_SCOUT_NICHE not set — skipping rotation")
+                return {"discovered": 0}
+
+            ensure_lead_scout_rotation(target_per_state=target)
+
+            if is_state_completed_today():
+                logger.debug("State already completed today — skipping")
+                return {"discovered": 0}
+
+            state = get_next_scout_state()
+            if not state:
+                complete_scout_cycle()
+                state = get_next_scout_state()
+                if not state:
+                    logger.info("All states complete for all cycles")
+                    return {"discovered": 0}
+
+            state_name = state.get("state_name", "")
+            current_collected = state["leads_collected"]
+            remaining = state["target_per_state"] - current_collected
+            batch_target = min(remaining, target)
+
+            logger.info("Rotation: state=%s collected=%d target=%d batch=%d",
+                        state_name, current_collected, state["target_per_state"], batch_target)
+
+            ddg = DuckDuckGoSource()
+            direct = DirectWebSource()
+            sources = []
+            if ddg.enabled: sources.append(ddg)
+            if direct.enabled: sources.append(direct)
+            llm = LLM()
+            agent = LeadScoutAgent(None, None, llm)
+            query = f"{niche} in {state_name}"
+            result = agent.run(user_input=query, target=batch_target)
+
+            total_saved = 0
+            if result.success and result.data:
+                for lead in result.data:
+                    lead["lead_type"] = "scraped"
+                    lead["source"] = "daemon_rotation"
+                    try:
+                        upsert_lead(lead)
+                        total_saved += 1
+                    except Exception:
+                        pass
+                if total_saved > 0:
+                    update_scout_state(state["id"], total_saved, state.get("state_code"))
+                    logger.info("Rotation: state=%s saved=%d", state_name, total_saved)
+
+                    recheck = get_next_scout_state()
+                    if not recheck or recheck["id"] != state["id"]:
+                        logger.info("Rotation: state=%s completed with %d leads", state_name, state["target_per_state"])
+            else:
+                logger.info("Rotation: no leads found for %s in %s", niche, state_name)
+
+            return {"discovered": total_saved}
+        except ImportError as e:
+            logger.debug("lead_scout_agent not available: %s", e)
+            return {"discovered": 0}
+        except Exception as e:
+            logger.error("Rotation scout error: %s", e)
+            return {"discovered": 0}
 
     def _run_lead_scout(self, config: dict) -> dict:
         """Run lead scout to discover new leads on schedule.
@@ -765,7 +857,33 @@ class DeusDaemon:
             "last_cycle_at": self._status.last_cycle_at,
             "agents_active": ["outreach", "followup", "appointment", "deal_closer", "report"],
             "outreach_enabled": _is_outreach_enabled(),
+            "lead_scout_rotation": self._get_rotation_status(),
         }
+
+    def _get_rotation_status(self) -> dict:
+        """Get lead scout rotation status for the dashboard."""
+        try:
+            from app.database import db_conn
+            with db_conn() as conn:
+                current_cycle = conn.execute("SELECT MAX(cycle_id) as c FROM lead_scout_rotation").fetchone()
+                if not current_cycle or not current_cycle["c"]:
+                    return {"error": "No rotation data"}
+                cycle_id = current_cycle["c"]
+                states = conn.execute(
+                    "SELECT * FROM lead_scout_rotation WHERE cycle_id = ? ORDER BY id", (cycle_id,)
+                ).fetchall()
+                total = len(states)
+                completed = sum(1 for s in states if s["completed"])
+                total_leads = sum(s["leads_collected"] or 0 for s in states)
+                return {
+                    "cycle_id": cycle_id,
+                    "total_states": total,
+                    "completed_states": completed,
+                    "total_leads_collected": total_leads,
+                    "states": [dict(s) for s in states],
+                }
+        except Exception as e:
+            return {"error": str(e)}
 
     def _get_all_configs(self) -> list:
         """Get all daemon configs for status reporting."""
