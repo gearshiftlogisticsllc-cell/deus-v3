@@ -715,6 +715,10 @@ No character limit." style="width:100%;font-family:Consolas,monospace;font-size:
         </div>
       </div>
       <div class="section">
+        <h3>Auto Lead Scout Status</h3>
+        <div id="auto-scout-status" style="font-size:13px;color:var(--muted)">Loading...</div>
+      </div>
+      <div class="section">
         <h3>Schedules</h3>
         <div style="font-size:12px;color:var(--muted);margin-bottom:10px">Agent schedules run on interval (minutes). Create schedules for LeadScout, Outreach, Followup, etc. Config JSON supports niche, target, and other agent params.</div>
         <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px;align-items:flex-end">
@@ -1751,6 +1755,8 @@ function loadDaemon() {
   loadDaemonConfigs();
   // Load schedules
   loadSchedules();
+  // Load auto scout status
+  loadAutoScoutStatus();
 }
 
 function loadDaemonConfigs() {
@@ -1928,6 +1934,34 @@ function runScheduleNow(id) {
     log('daemon-log', 'Schedule ran: '+(d.message||'OK'), d.success?'ok':'err');
     setTimeout(loadSchedules, 1000);
   }).catch(function(e) { log('daemon-log', 'Run error: '+e, 'err'); });
+}
+
+// ========== AUTO SCOUT ROTATION STATUS ==========
+function loadAutoScoutStatus() {
+  fetch(API+'/api/scout/rotation').then(r=>r.json()).then(function(d) {
+    var html = '';
+    if (d.error) {
+      html = '<span class="pill pill-off">Not seeded yet</span>';
+    } else {
+      var pct = d.total_states > 0 ? (d.completed_states / d.total_states * 100).toFixed(0) : 0;
+      html += '<div class="row" style="gap:16px">';
+      html += '<div class="stat-chip" style="text-align:center;min-width:60px"><div style="font-size:18px;font-weight:700;color:var(--cyan)">'+d.completed_states+'/'+d.total_states+'</div><div style="font-size:10px;color:var(--muted)">States Done</div></div>';
+      html += '<div class="stat-chip" style="text-align:center;min-width:60px"><div style="font-size:18px;font-weight:700;color:#A6E3A1">'+d.total_leads_collected+'</div><div style="font-size:10px;color:var(--muted)">Leads Collected</div></div>';
+      html += '<div class="stat-chip" style="text-align:center;min-width:60px"><div style="font-size:18px;font-weight:700;color:var(--amber)">Cycle #'+d.cycle_id+'</div><div style="font-size:10px;color:var(--muted)">Cycle</div></div>';
+      html += '</div>';
+      html += '<div style="margin-top:8px;max-height:200px;overflow-y:auto">';
+      html += '<table style="width:100%;font-size:11px"><thead><tr style="border-bottom:1px solid var(--border)"><th style="text-align:left;padding:2px">State</th><th style="text-align:right;padding:2px">Leads</th><th style="text-align:right;padding:2px">Target</th><th style="text-align:right;padding:2px">Status</th></tr></thead><tbody>';
+      (d.states||[]).forEach(function(s) {
+        var done = s.completed ? '✓' : s.leads_collected > 0 ? 'In Progress' : '—';
+        var color = s.completed ? 'var(--green)' : s.leads_collected > 0 ? 'var(--amber)' : 'var(--muted)';
+        html += '<tr><td style="padding:2px">'+(s.state_name||s.state_code)+'</td><td style="text-align:right;padding:2px;color:var(--cyan)">'+s.leads_collected+'</td><td style="text-align:right;padding:2px;color:var(--muted)">'+s.target_per_state+'</td><td style="text-align:right;padding:2px;color:'+color+'">'+done+'</td></tr>';
+      });
+      html += '</tbody></table></div>';
+    }
+    document.getElementById('auto-scout-status').innerHTML = html;
+  }).catch(function() {
+    document.getElementById('auto-scout-status').innerHTML = '<span class="pill pill-off">Rotation not available</span>';
+  });
 }
 
 // ========== DELIVERABILITY ==========

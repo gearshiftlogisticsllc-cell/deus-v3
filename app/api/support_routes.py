@@ -417,19 +417,20 @@ def reset_daemon_configs():
             for e in entries:
                 session.delete(e)
             defaults = [
-                ("lead_scout", "Lead Scout", 1, "scraped", 0),
-                ("outreach", "Outreach", 1, "scraped", 10),
-                ("followup", "Followup", 1, "", 0),
-                ("reply_scan", "Reply Scan", 1, "", 0),
-                ("campaign", "Campaign Steps", 1, "", 0),
-                ("appointment", "Appointment", 1, "", 0),
-                ("deal_closer", "Deal Closer", 1, "", 0),
-                ("report", "Report Agent", 1, "", 0),
+                ("lead_scout", "Lead Scout", 1, "scraped", 0, "18:00", "Monday,Tuesday,Wednesday,Thursday,Friday,Saturday,Sunday", '{"niche":"","target":400,"auto_rotation":true}'),
+                ("outreach", "Outreach", 1, "scraped", 10, "", "", "{}"),
+                ("followup", "Followup", 1, "", 0, "", "", "{}"),
+                ("reply_scan", "Reply Scan", 1, "", 0, "", "", "{}"),
+                ("campaign", "Campaign Steps", 1, "", 0, "", "", "{}"),
+                ("appointment", "Appointment", 1, "", 0, "", "", "{}"),
+                ("deal_closer", "Deal Closer", 1, "", 0, "", "", "{}"),
+                ("report", "Report Agent", 1, "", 0, "", "", "{}"),
             ]
-            for name, display, enabled, ltf, mpr in defaults:
+            for name, display, enabled, ltf, mpr, rat, rod, cj in defaults:
                 session.add(DaemonConfig(
                     agent_name=name, display_name=display,
-                    enabled=enabled, lead_type_filter=ltf, max_per_run=mpr
+                    enabled=enabled, lead_type_filter=ltf, max_per_run=mpr,
+                    run_at_time=rat, run_on_days=rod, config_json=cj
                 ))
             session.commit()
             return {"success": True}
@@ -440,6 +441,20 @@ def reset_daemon_configs():
             return {"success": True}
         except Exception as e:
             raise HTTPException(status_code=500, detail=str(e))
+
+
+# ---------------------------------------------------------------------------
+# Lead Scout State Rotation
+# ---------------------------------------------------------------------------
+
+@router.get("/api/scout/rotation")
+def get_scout_rotation():
+    try:
+        from app.database import get_scout_rotation_status, ensure_lead_scout_rotation
+        ensure_lead_scout_rotation()
+        return get_scout_rotation_status()
+    except Exception as e:
+        return {"error": str(e)}
 
 
 # ---------------------------------------------------------------------------

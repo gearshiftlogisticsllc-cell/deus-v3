@@ -80,17 +80,17 @@ def init_orm():
         dc_count = session.execute(select(func.count()).select_from(DaemonConfig)).scalar() or 0
         if dc_count == 0:
             defaults = [
-                ("lead_scout", "Lead Scout", 1, "scraped", 0),
-                ("outreach", "Outreach", 1, "scraped", 10),
-                ("followup", "Followup", 1, "", 0),
-                ("reply_scan", "Reply Scan", 1, "", 0),
-                ("campaign", "Campaign Steps", 1, "", 0),
-                ("appointment", "Appointment", 1, "", 0),
-                ("deal_closer", "Deal Closer", 1, "", 0),
-                ("report", "Report Agent", 1, "", 0),
+                ("lead_scout", "Lead Scout", 1, "scraped", 0, "18:00", "Monday,Tuesday,Wednesday,Thursday,Friday,Saturday,Sunday", '{"niche":"","target":400,"auto_rotation":true}'),
+                ("outreach", "Outreach", 1, "scraped", 10, "", "", "{}"),
+                ("followup", "Followup", 1, "", 0, "", "", "{}"),
+                ("reply_scan", "Reply Scan", 1, "", 0, "", "", "{}"),
+                ("campaign", "Campaign Steps", 1, "", 0, "", "", "{}"),
+                ("appointment", "Appointment", 1, "", 0, "", "", "{}"),
+                ("deal_closer", "Deal Closer", 1, "", 0, "", "", "{}"),
+                ("report", "Report Agent", 1, "", 0, "", "", "{}"),
             ]
-            for name, display, enabled, ltf, mpr in defaults:
-                session.add(DaemonConfig(agent_name=name, display_name=display, enabled=enabled, lead_type_filter=ltf, max_per_run=mpr))
+            for name, display, enabled, ltf, mpr, rat, rod, cj in defaults:
+                session.add(DaemonConfig(agent_name=name, display_name=display, enabled=enabled, lead_type_filter=ltf, max_per_run=mpr, run_at_time=rat, run_on_days=rod, config_json=cj))
             session.commit()
             logger.info("Default daemon configs seeded")
 

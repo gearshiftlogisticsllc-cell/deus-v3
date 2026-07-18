@@ -683,6 +683,72 @@ class DeusDaemon:
         except Exception as e:
             logger.error("Lead scout geo targets error: %s", e)
 
+        # Source 3: Auto state rotation mode (niche + auto_rotation in config_json)
+        try:
+            cfg_json = config.get("config_json", {})
+            auto_rotation = cfg_json.get("auto_rotation", False)
+            auto_niche = cfg_json.get("niche", "").strip()
+            target_per_run = int(cfg_json.get("target", 400) or 400)
+            if auto_rotation and auto_niche:
+                from app.database import (
+                    ensure_lead_scout_rotation, get_next_scout_state,
+                    update_scout_state, complete_scout_cycle, upsert_lead
+                )
+                from lead_scout_agent import LeadScoutAgent, LLM, DuckDuckGoSource, DirectWebSource
+
+                ensure_lead_scout_rotation(target_per_state=target_per_run)
+
+                # Check if auto cycle is fully done — if so, reset and stop for today
+                state = get_next_scout_state()
+                if not state:
+                    complete_scout_cycle()
+                    state = get_next_scout_state()
+                    if not state:
+                        logger.info("Auto scout: all states complete for all cycles")
+                        return {"discovered": total_discovered, "auto_done": True}
+
+                state_name = state.get("state_name", "")
+                remaining = state["target_per_state"] - state["leads_collected"]
+                batch_target = min(remaining, 50)  # scout in batches of 50 max per cycle
+
+                logger.info("Auto scout: state=%s collected=%d target=%d remaining=%d batch=%d",
+                            state_name, state["leads_collected"], state["target_per_state"], remaining, batch_target)
+
+                ddg = DuckDuckGoSource()
+                direct = DirectWebSource()
+                sources = []
+                if ddg.enabled: sources.append(ddg)
+                if direct.enabled: sources.append(direct)
+                llm = LLM()
+                agent = LeadScoutAgent(None, None, llm)
+                query = f"{auto_niche} in {state_name}"
+                result = agent.run(user_input=query, target=batch_target)
+                if result.success and result.data:
+                    saved = 0
+                    for lead in result.data:
+                        lead["lead_type"] = "scraped"
+                        lead["source"] = "auto_rotation_scout"
+                        try:
+                            upsert_lead(lead)
+                            saved += 1
+                        except Exception:
+                            pass
+                    if saved > 0:
+                        update_scout_state(state["id"], saved, state.get("state_code"))
+                        total_discovered += saved
+                        logger.info("Auto scout: state=%s saved=%d total_for_state=%d",
+                                    state_name, saved, state["leads_collected"] + saved)
+
+                        recheck = get_next_scout_state()
+                        if not recheck or recheck["id"] != state["id"]:
+                            logger.info("Auto scout: state=%s completed with %d leads", state_name, state["target_per_state"])
+                else:
+                    logger.info("Auto scout: no leads found for %s in %s", auto_niche, state_name)
+        except ImportError:
+            logger.debug("lead_scout_agent not available for auto rotation")
+        except Exception as e:
+            logger.error("Auto rotation scout error: %s", e)
+
         return {"discovered": total_discovered}
 
     # ------------------------------------------------------------------

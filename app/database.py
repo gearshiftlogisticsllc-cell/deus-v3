@@ -394,16 +394,16 @@ def _init_db_sqlite():
             );
 
             -- Insert defaults for all known agents
-            INSERT OR IGNORE INTO daemon_config (agent_name, display_name, enabled, lead_type_filter, max_per_run)
+            INSERT OR IGNORE INTO daemon_config (agent_name, display_name, enabled, lead_type_filter, max_per_run, run_at_time, run_on_days, config_json)
             VALUES
-                ('lead_scout', 'Lead Scout', 1, 'scraped', 0),
-                ('outreach', 'Outreach', 1, 'scraped', 10),
-                ('followup', 'Followup', 1, '', 0),
-                ('reply_scan', 'Reply Scan', 1, '', 0),
-                ('campaign', 'Campaign Steps', 1, '', 0),
-                ('appointment', 'Appointment', 1, '', 0),
-                ('deal_closer', 'Deal Closer', 1, '', 0),
-                ('report', 'Report Agent', 1, '', 0);
+                ('lead_scout', 'Lead Scout', 1, 'scraped', 0, '18:00', 'Monday,Tuesday,Wednesday,Thursday,Friday,Saturday,Sunday', '{"niche":"","target":400,"auto_rotation":true}'),
+                ('outreach', 'Outreach', 1, 'scraped', 10, '', '', '{}'),
+                ('followup', 'Followup', 1, '', 0, '', '', '{}'),
+                ('reply_scan', 'Reply Scan', 1, '', 0, '', '', '{}'),
+                ('campaign', 'Campaign Steps', 1, '', 0, '', '', '{}'),
+                ('appointment', 'Appointment', 1, '', 0, '', '', '{}'),
+                ('deal_closer', 'Deal Closer', 1, '', 0, '', '', '{}'),
+                ('report', 'Report Agent', 1, '', 0, '', '', '{}');
         """)
 
         # LinkedIn outreach queue
@@ -442,6 +442,19 @@ def _init_db_sqlite():
                 token_json TEXT NOT NULL,
                 sender_email TEXT DEFAULT '',
                 updated_at REAL DEFAULT (strftime('%s','now'))
+            );
+
+            -- Lead Scout state rotation for auto mode
+            CREATE TABLE IF NOT EXISTS lead_scout_rotation (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                state_code TEXT NOT NULL,
+                state_name TEXT NOT NULL DEFAULT '',
+                leads_collected INTEGER DEFAULT 0,
+                target_per_state INTEGER DEFAULT 400,
+                completed INTEGER DEFAULT 0,
+                cycle_id INTEGER DEFAULT 1,
+                last_run_at REAL DEFAULT 0,
+                created_at REAL DEFAULT (strftime('%s','now'))
             )
         """)
 
@@ -1053,16 +1066,16 @@ def reset_daemon_configs():
     with db_conn() as conn:
         conn.execute("DELETE FROM daemon_config")
         conn.executescript("""
-            INSERT INTO daemon_config (agent_name, display_name, enabled, lead_type_filter, max_per_run)
+            INSERT INTO daemon_config (agent_name, display_name, enabled, lead_type_filter, max_per_run, run_at_time, run_on_days, config_json)
             VALUES
-                ('lead_scout', 'Lead Scout', 1, 'scraped', 0),
-                ('outreach', 'Outreach', 1, 'scraped', 10),
-                ('followup', 'Followup', 1, '', 0),
-                ('reply_scan', 'Reply Scan', 1, '', 0),
-                ('campaign', 'Campaign Steps', 1, '', 0),
-                ('appointment', 'Appointment', 1, '', 0),
-                ('deal_closer', 'Deal Closer', 1, '', 0),
-                ('report', 'Report Agent', 1, '', 0);
+                ('lead_scout', 'Lead Scout', 1, 'scraped', 0, '18:00', 'Monday,Tuesday,Wednesday,Thursday,Friday,Saturday,Sunday', '{"niche":"","target":400,"auto_rotation":true}'),
+                ('outreach', 'Outreach', 1, 'scraped', 10, '', '', '{}'),
+                ('followup', 'Followup', 1, '', 0, '', '', '{}'),
+                ('reply_scan', 'Reply Scan', 1, '', 0, '', '', '{}'),
+                ('campaign', 'Campaign Steps', 1, '', 0, '', '', '{}'),
+                ('appointment', 'Appointment', 1, '', 0, '', '', '{}'),
+                ('deal_closer', 'Deal Closer', 1, '', 0, '', '', '{}'),
+                ('report', 'Report Agent', 1, '', 0, '', '', '{}');
         """)
 
 
@@ -1172,3 +1185,110 @@ def export_linkedin_csv(status: str = None) -> str:
             note, e.get("status", "pending"),
         ])
     return output.getvalue()
+
+
+# ---------------------------------------------------------------------------
+# Lead Scout State Rotation
+# ---------------------------------------------------------------------------
+
+ALL_US_STATES = [
+    ("AL", "Alabama"), ("AK", "Alaska"), ("AZ", "Arizona"), ("AR", "Arkansas"),
+    ("CA", "California"), ("CO", "Colorado"), ("CT", "Connecticut"),
+    ("DE", "Delaware"), ("FL", "Florida"), ("GA", "Georgia"),
+    ("HI", "Hawaii"), ("ID", "Idaho"), ("IL", "Illinois"), ("IN", "Indiana"),
+    ("IA", "Iowa"), ("KS", "Kansas"), ("KY", "Kentucky"), ("LA", "Louisiana"),
+    ("ME", "Maine"), ("MD", "Maryland"), ("MA", "Massachusetts"), ("MI", "Michigan"),
+    ("MN", "Minnesota"), ("MS", "Mississippi"), ("MO", "Missouri"), ("MT", "Montana"),
+    ("NE", "Nebraska"), ("NV", "Nevada"), ("NH", "New Hampshire"), ("NJ", "New Jersey"),
+    ("NM", "New Mexico"), ("NY", "New York"), ("NC", "North Carolina"), ("ND", "North Dakota"),
+    ("OH", "Ohio"), ("OK", "Oklahoma"), ("OR", "Oregon"), ("PA", "Pennsylvania"),
+    ("RI", "Rhode Island"), ("SC", "South Carolina"), ("SD", "South Dakota"),
+    ("TN", "Tennessee"), ("TX", "Texas"), ("UT", "Utah"), ("VT", "Vermont"),
+    ("VA", "Virginia"), ("WA", "Washington"), ("WV", "West Virginia"), ("WI", "Wisconsin"),
+    ("WY", "Wyoming"),
+]
+
+
+def ensure_lead_scout_rotation(target_per_state: int = 400) -> int:
+    """Seed the rotation table if empty and return the current cycle_id."""
+    with db_conn() as conn:
+        count = conn.execute("SELECT COUNT(*) as c FROM lead_scout_rotation").fetchone()["c"]
+        if count == 0:
+            for code, name in ALL_US_STATES:
+                conn.execute(
+                    """INSERT INTO lead_scout_rotation
+                       (state_code, state_name, target_per_state, completed)
+                       VALUES (?, ?, ?, 0)""",
+                    (code, name, target_per_state),
+                )
+            return 1
+        return conn.execute("SELECT MAX(cycle_id) as c FROM lead_scout_rotation").fetchone()["c"] or 1
+
+
+def get_next_scout_state(cycle_id: int = None) -> dict:
+    """Get the next uncompleted state for the given cycle."""
+    with db_conn() as conn:
+        if cycle_id is None:
+            cycle_id = conn.execute("SELECT MAX(cycle_id) as c FROM lead_scout_rotation").fetchone()["c"] or 1
+        row = conn.execute(
+            """SELECT * FROM lead_scout_rotation
+               WHERE completed = 0 AND cycle_id = ?
+               ORDER BY id ASC LIMIT 1""",
+            (cycle_id,),
+        ).fetchone()
+        if row:
+            return dict(row)
+        return None
+
+
+def update_scout_state(state_id: int, leads_added: int, state_code: str = None):
+    """Update leads collected. If >= target, mark completed and check for full cycle."""
+    import time
+    now = time.time()
+    with db_conn() as conn:
+        row = conn.execute("SELECT * FROM lead_scout_rotation WHERE id = ?", (state_id,)).fetchone()
+        if not row:
+            return
+        new_total = row["leads_collected"] + leads_added
+        completed = 1 if new_total >= row["target_per_state"] else 0
+        conn.execute(
+            "UPDATE lead_scout_rotation SET leads_collected = ?, completed = ?, last_run_at = ? WHERE id = ?",
+            (new_total, completed, now, state_id),
+        )
+
+
+def get_scout_rotation_status() -> dict:
+    """Return summary of all states in the current cycle."""
+    with db_conn() as conn:
+        cycle_id = conn.execute("SELECT MAX(cycle_id) as c FROM lead_scout_rotation").fetchone()["c"] or 1
+        rows = conn.execute(
+            "SELECT * FROM lead_scout_rotation WHERE cycle_id = ? ORDER BY id", (cycle_id,)
+        ).fetchall()
+        total = len(rows)
+        completed = sum(1 for r in rows if r["completed"])
+        total_leads = sum(r["leads_collected"] for r in rows)
+        return {
+            "cycle_id": cycle_id,
+            "total_states": total,
+            "completed_states": completed,
+            "total_leads_collected": total_leads,
+            "states": [dict(r) for r in rows],
+        }
+
+
+def complete_scout_cycle():
+    """When all states done, increment cycle_id."""
+    with db_conn() as conn:
+        current = conn.execute("SELECT MAX(cycle_id) as c FROM lead_scout_rotation").fetchone()["c"] or 1
+        incomplete = conn.execute(
+            "SELECT COUNT(*) as c FROM lead_scout_rotation WHERE cycle_id = ? AND completed = 0",
+            (current,),
+        ).fetchone()["c"]
+        if incomplete == 0:
+            for code, name in ALL_US_STATES:
+                conn.execute(
+                    """INSERT INTO lead_scout_rotation
+                       (state_code, state_name, cycle_id, target_per_state, completed)
+                       VALUES (?, ?, ?, 400, 0)""",
+                    (code, name, current + 1),
+                )
