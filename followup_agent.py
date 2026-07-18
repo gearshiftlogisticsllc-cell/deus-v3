@@ -26,6 +26,7 @@ from dotenv import load_dotenv
 
 from base_agent import BaseAgent, AgentResult, AgentHealth, make_result, make_health
 from reply_detector import EmailTracker, scan_for_replies
+from rules_engine import get_rules_context
 
 load_dotenv()
 
@@ -303,12 +304,15 @@ class FollowupAgent(BaseAgent):
             pass
 
     def generate_followup_message(self, lead: dict) -> str:
+        rules = get_rules_context()
+        rules_block = f"\n\nRules/regulations that MUST be followed:\n{rules}\n" if rules else ""
         task = (
             f"Generate a brief, polite follow-up message for "
             f"'{lead.get('business_name', 'the business')}' "
             f"in the {lead.get('niche', 'their')} niche. "
             f"This is follow-up #{lead.get('contact_count', 0) + 1}. "
             f"Keep a professional tone, under 80 words, no invented sender name."
+            f"{rules_block}"
         )
         message = self.think(task)
         return message or (

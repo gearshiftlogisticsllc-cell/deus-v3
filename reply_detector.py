@@ -20,6 +20,7 @@ import base64
 import logging
 from datetime import datetime, timedelta, timezone
 from typing import Optional
+from rules_engine import get_rules_context
 
 logger = logging.getLogger(__name__)
 
@@ -312,12 +313,14 @@ class ReplyDetector:
             return {"success": False, "replies_found": 0, "leads_marked": 0,
                     "details": [], "error": str(e)}
 
+        rules_context = get_rules_context()
         return {
             "success": True,
             "replies_found": replies_found,
             "leads_marked": leads_marked,
             "unsubscribed_marked": unsubscribed_marked,
             "details": details,
+            "rules_context": rules_context,
             "error": "",
         }
 

@@ -325,122 +325,24 @@ def daemon_log(limit: int = 50):
 # ---------------------------------------------------------------------------
 
 @router.get("/api/daemon/config")
-def list_daemon_configs():
-    try:
-        from app.db import SessionLocal
-        from app.repositories import DaemonConfigRepository
-        with SessionLocal() as session:
-            repo = DaemonConfigRepository(session)
-            entries = repo.list(limit=100)
-            result = []
-            for e in entries:
-                d = {c.name: getattr(e, c.name) for c in e.__table__.columns}
-                try:
-                    import json
-                    d["config_json"] = json.loads(d.get("config_json", "{}"))
-                except Exception:
-                    d["config_json"] = {}
-                result.append(d)
-            return result
-    except Exception:
-        try:
-            from app.database import get_daemon_configs
-            return get_daemon_configs()
-        except Exception as e:
-            return {"error": str(e)}
+def get_daemon_config():
+    """Return simplified daemon config — just outreach toggle status."""
+    from daemon import _is_outreach_enabled
+    return {"outreach_enabled": _is_outreach_enabled()}
 
 
-@router.get("/api/daemon/config/{agent_name}")
-def get_daemon_config(agent_name: str):
-    try:
-        from app.db import SessionLocal
-        from app.repositories import DaemonConfigRepository
-        with SessionLocal() as session:
-            repo = DaemonConfigRepository(session)
-            entry = repo.get_by_agent_name(agent_name)
-            if not entry:
-                raise HTTPException(status_code=404, detail=f"Agent '{agent_name}' not found")
-            d = {c.name: getattr(entry, c.name) for c in entry.__table__.columns}
-            try:
-                import json
-                d["config_json"] = json.loads(d.get("config_json", "{}"))
-            except Exception:
-                d["config_json"] = {}
-            return d
-    except HTTPException:
-        raise
-    except Exception:
-        try:
-            from app.database import get_daemon_config
-            cfg = get_daemon_config(agent_name)
-            if not cfg:
-                raise HTTPException(status_code=404, detail=f"Agent '{agent_name}' not found")
-            return cfg
-        except HTTPException:
-            raise
-        except Exception as e:
-            raise HTTPException(status_code=500, detail=str(e))
-
-
-@router.post("/api/daemon/config/{agent_name}")
-def save_daemon_config(agent_name: str, request: dict):
-    try:
-        from app.db import SessionLocal
-        from app.repositories import DaemonConfigRepository
-        with SessionLocal() as session:
-            repo = DaemonConfigRepository(session)
-            existing = repo.get_by_agent_name(agent_name)
-            if existing:
-                repo.update(existing.id, **request)
-            else:
-                repo.create(agent_name=agent_name, **request)
-            session.commit()
-            return {"success": True}
-    except Exception:
-        try:
-            from app.database import save_daemon_config as legacy_save
-            legacy_save(agent_name, request)
-            return {"success": True}
-        except Exception as e:
-            raise HTTPException(status_code=500, detail=str(e))
+@router.post("/api/daemon/outreach/toggle")
+def toggle_outreach(request: dict):
+    """Toggle outreach agent on/off."""
+    enabled = request.get("enabled", False)
+    from daemon import _set_outreach_enabled
+    _set_outreach_enabled(enabled)
+    return {"success": True, "outreach_enabled": enabled}
 
 
 @router.post("/api/daemon/config/reset")
 def reset_daemon_configs():
-    try:
-        from app.db import SessionLocal
-        from app.repositories import DaemonConfigRepository
-        from app.models.daemon import DaemonConfig
-        with SessionLocal() as session:
-            repo = DaemonConfigRepository(session)
-            entries = repo.list(limit=100)
-            for e in entries:
-                session.delete(e)
-            defaults = [
-                ("lead_scout", "Lead Scout", 1, "scraped", 0, "", "", '{"niche":"Hvac companies hiring administrative roles","target":400,"auto_rotation":true}'),
-                ("outreach", "Outreach", 1, "scraped", 10, "", "", "{}"),
-                ("followup", "Followup", 1, "", 0, "", "", "{}"),
-                ("reply_scan", "Reply Scan", 1, "", 0, "", "", "{}"),
-                ("campaign", "Campaign Steps", 1, "", 0, "", "", "{}"),
-                ("appointment", "Appointment", 1, "", 0, "", "", "{}"),
-                ("deal_closer", "Deal Closer", 1, "", 0, "", "", "{}"),
-                ("report", "Report Agent", 1, "", 0, "", "", "{}"),
-            ]
-            for name, display, enabled, ltf, mpr, rat, rod, cj in defaults:
-                session.add(DaemonConfig(
-                    agent_name=name, display_name=display,
-                    enabled=enabled, lead_type_filter=ltf, max_per_run=mpr,
-                    run_at_time=rat, run_on_days=rod, config_json=cj
-                ))
-            session.commit()
-            return {"success": True}
-    except Exception:
-        try:
-            from app.database import reset_daemon_configs as legacy_reset
-            legacy_reset()
-            return {"success": True}
-        except Exception as e:
-            raise HTTPException(status_code=500, detail=str(e))
+    return {"success": True, "message": "Per-agent daemon configs removed. Only outreach toggle remains (use /api/daemon/outreach/toggle)."}
 
 
 # ---------------------------------------------------------------------------

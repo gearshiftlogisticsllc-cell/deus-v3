@@ -13,6 +13,7 @@ from datetime import datetime, timedelta, timezone
 from dotenv import load_dotenv
 
 from base_agent import BaseAgent, AgentResult, AgentHealth, make_result, make_health
+from rules_engine import get_rules_context
 
 load_dotenv()
 
@@ -166,6 +167,9 @@ class AppointmentAgent(BaseAgent):
 
         booking_links_str = "\n".join(booking_links) if booking_links else "  (none available)"
 
+        rules = get_rules_context()
+        rules_block = f"\n\nRules/regulations that MUST be followed:\n{rules}\n" if rules else ""
+
         prompt = f"""You are an AI appointment scheduling assistant.
 
 Task: {task}
@@ -175,7 +179,7 @@ Available booking links:
 
 Upcoming appointments (next 7 days):
 {upcoming_summary}
-
+{rules_block}
 Recommend the most suitable event type and provide the booking link. Keep it concise."""
 
         agent_response = self.think(prompt)

@@ -1,26 +1,23 @@
 """
 daemon.py — DEUS 3.0
 ======================
-Always-running background daemon that handles ALL agents:
-  1. Auto-outreach for scout leads (lead_type='scraped')
-  2. Follow-up email sending (campaign-driven + ad-hoc)
-  3. Reply detection via IMAP scanning (ALWAYS active)
-  4. Campaign step advancement
-  5. Appointment agent (check + followup)
-  6. Deal closer agent (check for responses)
-  7. Report agent (periodic summary)
+Always-running background daemon.
+Runs ALL agents 24/7:
+  - Followup Agent (always active)
+  - Reply Detection (always active)
+  - Campaign Steps (always active)
+  - Appointment Agent (always active)
+  - Deal Closer (always active)
+  - Report Agent (periodic)
+
+Only Outreach has a simple enable/disable toggle.
+Lead Scout runs from its own tab — NOT inside daemon.
+
+Followup, Reply Detector, and Appointment agents
+automatically use PDF rules from rules_engine.py.
 
 Runs on a configurable interval (default: 4 minutes).
-Stores execution log in the daemon_log database table.
-
-Usage:
-    daemon = DeusDaemon()
-    daemon.start()
-    # ... later ...
-    daemon.stop()
-
-    # Or check status:
-    print(daemon.status())
+Stores execution log in the daemon_log table.
 """
 
 import os
@@ -56,14 +53,27 @@ class DaemonStatus:
     auto_stop_at: float = 0.0  # timestamp when daemon should auto-stop
 
 
+OUTREACH_FLAG_FILE = os.path.join(os.path.dirname(__file__), ".outreach_enabled")
+
+
+def _is_outreach_enabled() -> bool:
+    return os.path.exists(OUTREACH_FLAG_FILE)
+
+
+def _set_outreach_enabled(enabled: bool):
+    if enabled:
+        open(OUTREACH_FLAG_FILE, "a").close()
+    else:
+        try:
+            os.remove(OUTREACH_FLAG_FILE)
+        except FileNotFoundError:
+            pass
+
+
 class DeusDaemon:
     """
-    Always-running daemon for automated follow-ups and reply detection.
-
-    The daemon runs in a background thread and performs these tasks each cycle:
-      1. Scan for email replies (IMAP)
-      2. Send campaign steps that are due
-      3. Send ad-hoc follow-ups for non-campaign leads
+    Always-running daemon.
+    All agents run 24/7. Only Outreach has an enable/disable toggle.
     """
 
     def __init__(self, interval_seconds: int = None):
@@ -220,48 +230,8 @@ class DeusDaemon:
     # Main loop
     # ------------------------------------------------------------------
 
-    def _check_agent_config(self, agent_name: str) -> dict:
-        """Check daemon config for an agent. Returns config dict with defaults."""
-        default = {"enabled": True, "lead_type_filter": "", "max_per_run": 0, "config_json": {}}
-        try:
-            from app.database import get_daemon_config
-            cfg = get_daemon_config(agent_name)
-            if cfg:
-                default.update(cfg)
-        except Exception:
-            pass
-        return default
-
-    def _should_run(self, config: dict) -> bool:
-        """Check if an agent should run on this cycle based on time/day config."""
-        if not config.get("enabled", True):
-            return False
-
-        run_at_time = config.get("run_at_time", "")
-        run_on_days = config.get("run_on_days", "")
-
-        if not run_at_time and not run_on_days:
-            return True  # no scheduling restrictions
-
-        now = datetime.now()
-        current_day = now.strftime("%A")
-        current_time = now.strftime("%H:%M")
-
-        # Check day restriction
-        if run_on_days:
-            days = [d.strip() for d in run_on_days.split(",") if d.strip()]
-            if days and current_day not in days:
-                return False
-
-        # Check time restriction (only run if current time >= run_at_time within the cycle)
-        if run_at_time:
-            if current_time < run_at_time:
-                return False
-
-        return True
-
     def _run_loop(self):
-        """Main daemon loop — runs agent tasks based on per-agent config."""
+        """Main daemon loop — runs all agents 24/7. Only Outreach checks its toggle."""
         logger.info("Daemon loop started")
 
         while self._running:
@@ -280,108 +250,67 @@ class DeusDaemon:
             deal_checks = 0
             errors = 0
             error_msg = ""
+            leads_discovered = 0
 
-            # Load per-agent configs
-            outreach_config = self._check_agent_config("outreach")
-            reply_config = self._check_agent_config("reply_scan")
-            campaign_config = self._check_agent_config("campaign")
-            followup_config = self._check_agent_config("followup")
-            appointment_config = self._check_agent_config("appointment")
-            deal_config = self._check_agent_config("deal_closer")
-            scout_config = self._check_agent_config("lead_scout")
+            # Task 1: Scan for replies (ALWAYS active — 24/7)
+            try:
+                reply_result = self._scan_replies()
+                replies_found = reply_result.get("replies_found", 0)
+                leads_marked = reply_result.get("leads_marked", 0)
+                self._status.total_replies_detected += replies_found
+            except Exception as e:
+                errors += 1
+                error_msg = f"Reply scan: {e}"
+                logger.error("Reply scan failed: %s", e)
 
-            # Task 0: Lead scout — discover new leads on user-defined schedule
-            if self._should_run(scout_config):
+            # Task 2: Send due campaign steps (ALWAYS active)
+            try:
+                campaign_result = self._send_campaign_steps()
+                campaign_emails = campaign_result.get("sent", 0)
+                self._status.total_campaign_steps += campaign_emails
+            except Exception as e:
+                errors += 1
+                error_msg = f"Campaign steps: {e}"
+                logger.error("Campaign step sending failed: %s", e)
+
+            # Task 3: Send ad-hoc follow-ups (ALWAYS active)
+            try:
+                followup_result = self._send_followups()
+                followup_emails = followup_result.get("sent", 0)
+                self._status.total_emails_sent += followup_emails
+            except Exception as e:
+                errors += 1
+                error_msg = f"Follow-ups: {e}"
+                logger.error("Follow-up sending failed: %s", e)
+
+            # Task 4: Check appointment agent (ALWAYS active)
+            try:
+                apt_result = self._run_appointment_agent()
+                appointment_checks = apt_result.get("checked", 0)
+            except Exception as e:
+                errors += 1
+                error_msg = f"Appointment: {e}"
+                logger.error("Appointment check failed: %s", e)
+
+            # Task 5: Check deal closer agent (ALWAYS active)
+            try:
+                deal_result = self._run_deal_closer()
+                deal_checks = deal_result.get("checked", 0)
+            except Exception as e:
+                errors += 1
+                error_msg = f"Deal closer: {e}"
+                logger.error("Deal closer check failed: %s", e)
+
+            # Task 6: Auto-outreach (only if toggle is ON)
+            if _is_outreach_enabled():
                 try:
-                    scout_result = self._run_lead_scout(scout_config)
-                    leads_discovered = scout_result.get("discovered", 0)
-                except Exception as e:
-                    leads_discovered = 0
-                    errors += 1
-                    error_msg = f"Lead scout: {e}"
-                    logger.error("Lead scout failed: %s", e)
-            else:
-                leads_discovered = 0
-                logger.debug("Lead scout skipped (disabled by config)")
-
-            # Task 1: Auto-outreach for scout leads (lead_type='scraped')
-            if self._should_run(outreach_config):
-                try:
-                    lead_type = outreach_config.get("lead_type_filter", "scraped") or None
-                    max_per_run = outreach_config.get("max_per_run", 10) or 10
-                    outreach_result = self._auto_outreach_scout(lead_type=lead_type, limit=max_per_run, config=outreach_config)
+                    outreach_result = self._auto_outreach_scout()
                     auto_outreach = outreach_result.get("sent", 0)
                     self._status.total_emails_sent += auto_outreach
                 except Exception as e:
                     errors += 1
                     error_msg = f"Auto-outreach: {e}"
                     logger.error("Auto-outreach failed: %s", e)
-            else:
-                logger.debug("Auto-outreach skipped (disabled by config)")
-
-            # Task 2: Scan for replies
-            if self._should_run(reply_config):
-                try:
-                    reply_result = self._scan_replies()
-                    replies_found = reply_result.get("replies_found", 0)
-                    leads_marked = reply_result.get("leads_marked", 0)
-                    self._status.total_replies_detected += replies_found
-                except Exception as e:
-                    errors += 1
-                    error_msg = f"Reply scan: {e}"
-                    logger.error("Reply scan failed: %s", e)
-            else:
-                logger.debug("Reply scan skipped (disabled by config)")
-
-            # Task 3: Send due campaign steps
-            if self._should_run(campaign_config):
-                try:
-                    campaign_result = self._send_campaign_steps()
-                    campaign_emails = campaign_result.get("sent", 0)
-                    self._status.total_campaign_steps += campaign_emails
-                except Exception as e:
-                    errors += 1
-                    error_msg = f"Campaign steps: {e}"
-                    logger.error("Campaign step sending failed: %s", e)
-            else:
-                logger.debug("Campaign steps skipped (disabled by config)")
-
-            # Task 4: Send ad-hoc follow-ups (non-campaign leads)
-            if self._should_run(followup_config):
-                try:
-                    followup_result = self._send_followups()
-                    followup_emails = followup_result.get("sent", 0)
-                    self._status.total_emails_sent += followup_emails
-                except Exception as e:
-                    errors += 1
-                    error_msg = f"Follow-ups: {e}"
-                    logger.error("Follow-up sending failed: %s", e)
-            else:
-                logger.debug("Follow-ups skipped (disabled by config)")
-
-            # Task 5: Check appointment agent
-            if self._should_run(appointment_config):
-                try:
-                    apt_result = self._run_appointment_agent()
-                    appointment_checks = apt_result.get("checked", 0)
-                except Exception as e:
-                    errors += 1
-                    error_msg = f"Appointment: {e}"
-                    logger.error("Appointment check failed: %s", e)
-            else:
-                logger.debug("Appointment skipped (disabled by config)")
-
-            # Task 6: Check deal closer agent
-            if self._should_run(deal_config):
-                try:
-                    deal_result = self._run_deal_closer()
-                    deal_checks = deal_result.get("checked", 0)
-                except Exception as e:
-                    errors += 1
-                    error_msg = f"Deal closer: {e}"
-                    logger.error("Deal closer check failed: %s", e)
-            else:
-                logger.debug("Deal closer skipped (disabled by config)")
 
             duration = time.time() - cycle_start
             self._status.last_cycle_at = time.time()
@@ -401,12 +330,12 @@ class DeusDaemon:
                 auto_outreach=auto_outreach,
                 appointment_checks=appointment_checks,
                 deal_checks=deal_checks,
-                leads_discovered=leads_discovered,
+                leads_discovered=0,
             )
 
             logger.info(
-                "--- Cycle #%d done (%.1fs): scout=%d, outreach=%d, replies=%d, campaign=%d, followup=%d, appt=%d, deal=%d, errors=%d ---",
-                cycle_num, duration, leads_discovered, auto_outreach, replies_found, campaign_emails,
+                "--- Cycle #%d done (%.1fs): outreach=%d, replies=%d, campaign=%d, followup=%d, appt=%d, deal=%d, errors=%d ---",
+                cycle_num, duration, auto_outreach, replies_found, campaign_emails,
                 followup_emails, appointment_checks, deal_checks, errors,
             )
 
@@ -414,7 +343,6 @@ class DeusDaemon:
                 try:
                     self._callback({
                         "cycle": cycle_num,
-                        "leads_discovered": leads_discovered,
                         "auto_outreach": auto_outreach,
                         "replies": replies_found,
                         "campaign_sent": campaign_emails,
@@ -835,8 +763,8 @@ class DeusDaemon:
             "errors": self._status.errors,
             "last_error": self._status.last_error,
             "last_cycle_at": self._status.last_cycle_at,
-            "agents_active": ["lead_scout", "outreach", "followup", "appointment", "deal_closer", "report"],
-            "agent_configs": self._get_all_configs(),
+            "agents_active": ["outreach", "followup", "appointment", "deal_closer", "report"],
+            "outreach_enabled": _is_outreach_enabled(),
         }
 
     def _get_all_configs(self) -> list:
