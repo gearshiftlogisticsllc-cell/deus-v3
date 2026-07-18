@@ -336,6 +336,34 @@ def init_db():
             );
         """)
 
+        # Daemon per-agent configuration
+        conn.executescript("""
+            CREATE TABLE IF NOT EXISTS daemon_config (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                agent_name TEXT UNIQUE NOT NULL,
+                display_name TEXT DEFAULT '',
+                enabled INTEGER DEFAULT 1,
+                lead_type_filter TEXT DEFAULT '',
+                max_per_run INTEGER DEFAULT 0,
+                interval_override INTEGER DEFAULT 0,
+                run_at_time TEXT DEFAULT '',
+                run_on_days TEXT DEFAULT '',
+                config_json TEXT DEFAULT '{}'
+            );
+
+            -- Insert defaults for all known agents
+            INSERT OR IGNORE INTO daemon_config (agent_name, display_name, enabled, lead_type_filter, max_per_run)
+            VALUES
+                ('lead_scout', 'Lead Scout', 1, 'scraped', 0),
+                ('outreach', 'Outreach', 1, 'scraped', 10),
+                ('followup', 'Followup', 1, '', 0),
+                ('reply_scan', 'Reply Scan', 1, '', 0),
+                ('campaign', 'Campaign Steps', 1, '', 0),
+                ('appointment', 'Appointment', 1, '', 0),
+                ('deal_closer', 'Deal Closer', 1, '', 0),
+                ('report', 'Report Agent', 1, '', 0);
+        """)
+
         # Gmail API token (persists across Railway restarts)
         conn.execute("""
             CREATE TABLE IF NOT EXISTS gmail_tokens (
@@ -350,6 +378,7 @@ def init_db():
         for col, typedef in [
             ("scheduled_day", "TEXT DEFAULT ''"),
             ("scheduled_time", "TEXT DEFAULT ''"),
+            ("scheduled_date", "TEXT DEFAULT ''"),  # specific date YYYY-MM-DD (in addition to day-of-week)
         ]:
             try:
                 conn.execute(f"ALTER TABLE geo_targets ADD COLUMN {col} {typedef}")
@@ -871,3 +900,95 @@ def delete_gmail_token():
     """Remove the stored Gmail token."""
     with db_conn() as conn:
         conn.execute("DELETE FROM gmail_tokens WHERE id = 1")
+
+
+# ---------------------------------------------------------------------------
+# Daemon per-agent configuration
+# ---------------------------------------------------------------------------
+
+def get_daemon_configs() -> list[dict]:
+    """Get all daemon agent configurations."""
+    with db_conn() as conn:
+        rows = conn.execute("SELECT * FROM daemon_config ORDER BY id").fetchall()
+        result = []
+        for r in rows:
+            d = dict(r)
+            try:
+                d["config_json"] = json.loads(d.get("config_json", "{}"))
+            except Exception:
+                d["config_json"] = {}
+            result.append(d)
+        return result
+
+
+def get_daemon_config(agent_name: str) -> dict:
+    """Get a single daemon agent configuration."""
+    with db_conn() as conn:
+        row = conn.execute(
+            "SELECT * FROM daemon_config WHERE agent_name = ?", (agent_name,)
+        ).fetchone()
+        if row:
+            d = dict(row)
+            try:
+                d["config_json"] = json.loads(d.get("config_json", "{}"))
+            except Exception:
+                d["config_json"] = {}
+            return d
+        return None
+
+
+def save_daemon_config(agent_name: str, config: dict):
+    """Insert or update a daemon agent configuration."""
+    with db_conn() as conn:
+        existing = conn.execute(
+            "SELECT id FROM daemon_config WHERE agent_name = ?", (agent_name,)
+        ).fetchone()
+        if existing:
+            sets = []
+            vals = []
+            for field in ["enabled", "lead_type_filter", "max_per_run",
+                          "interval_override", "run_at_time", "run_on_days"]:
+                if field in config:
+                    sets.append(f"{field} = ?")
+                    vals.append(config[field])
+            if "config_json" in config:
+                sets.append("config_json = ?")
+                vals.append(json.dumps(config["config_json"]) if isinstance(config["config_json"], dict) else config["config_json"])
+            if sets:
+                vals.append(existing["id"])
+                conn.execute(f"UPDATE daemon_config SET {', '.join(sets)} WHERE id = ?", vals)
+        else:
+            conn.execute(
+                """INSERT INTO daemon_config (agent_name, display_name, enabled, lead_type_filter,
+                   max_per_run, interval_override, run_at_time, run_on_days, config_json)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                (
+                    agent_name,
+                    config.get("display_name", agent_name),
+                    config.get("enabled", True),
+                    config.get("lead_type_filter", ""),
+                    config.get("max_per_run", 0),
+                    config.get("interval_override", 0),
+                    config.get("run_at_time", ""),
+                    config.get("run_on_days", ""),
+                    json.dumps(config.get("config_json", {})),
+                ),
+            )
+
+
+def reset_daemon_configs():
+    """Reset all daemon configurations to defaults."""
+    with db_conn() as conn:
+        conn.execute("DELETE FROM daemon_config")
+        conn.executescript("""
+            INSERT INTO daemon_config (agent_name, display_name, enabled, lead_type_filter, max_per_run)
+            VALUES
+                ('lead_scout', 'Lead Scout', 1, 'scraped', 0),
+                ('outreach', 'Outreach', 1, 'scraped', 10),
+                ('followup', 'Followup', 1, '', 0),
+                ('reply_scan', 'Reply Scan', 1, '', 0),
+                ('campaign', 'Campaign Steps', 1, '', 0),
+                ('appointment', 'Appointment', 1, '', 0),
+                ('deal_closer', 'Deal Closer', 1, '', 0),
+                ('report', 'Report Agent', 1, '', 0);
+        """)

@@ -85,7 +85,7 @@ logger = logging.getLogger("lead_scout")
 # ===========================================================================
 TARGET_LEADS = 400                      # collection goal (was 200)
 GROQ_MODEL = "llama-3.3-70b-versatile"
-GEMINI_MODEL = "gemini-2.5-flash"       # cheap/fast; on free tier
+GEMINI_MODEL = "gemini-2.5-flash"
 
 EMAIL_RE = re.compile(r"[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}")
 MAILTO_RE = re.compile(r"mailto:([a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,})", re.I)

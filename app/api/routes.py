@@ -610,15 +610,19 @@ def save_api_key(env_var: str, request: dict):
 
 @router.get("/api/leads/segmented")
 def leads_segmented():
-    """Return all leads from DB or leads.json, grouped by type."""
+    """Return all leads from DB or leads.json, grouped by type. Includes ALL fields."""
     try:
-        from app.database import db_conn
+        from app.database import db_conn, _LEAD_FIELDS
         all_leads = []
 
         try:
             with db_conn() as conn:
+                cols = ", ".join(["id", "created_at", "updated_at", "first_contacted_at",
+                                  "last_contacted_at", "contact_count", "email_verified",
+                                  "email_verified_at", "verification_method", "outreach_ready",
+                                  "needs_human", "needs_human_reason"] + list(_LEAD_FIELDS))
                 rows = conn.execute(
-                    """SELECT id, business_name, business_email, status, source, lead_type, created_at
+                    f"""SELECT {cols}
                        FROM leads ORDER BY created_at DESC LIMIT 500"""
                 ).fetchall()
                 all_leads = [dict(r) for r in rows]
@@ -633,10 +637,19 @@ def leads_segmented():
                     all_leads.append({
                         "id": l.get("id", 0),
                         "business_name": l.get("business_name", ""),
+                        "owner_name": l.get("owner_name", ""),
                         "business_email": l.get("business_email", ""),
-                        "status": l.get("status", "new"),
+                        "phone": l.get("phone", ""),
+                        "website": l.get("website", ""),
+                        "address": l.get("address", ""),
+                        "niche": l.get("niche", ""),
+                        "category": l.get("category", ""),
+                        "services_offered": l.get("services_offered", ""),
+                        "linkedin_url": l.get("linkedin_url", ""),
                         "source": l.get("source", "json"),
+                        "status": l.get("status", "new"),
                         "lead_type": l.get("lead_type", "scraped"),
+                        "score": l.get("score", 0),
                         "created_at": l.get("created_at", 0),
                     })
 
@@ -991,6 +1004,57 @@ def daemon_log(limit: int = 50):
 
 
 # ---------------------------------------------------------------------------
+# Daemon per-agent configuration
+# ---------------------------------------------------------------------------
+
+@router.get("/api/daemon/config")
+def list_daemon_configs():
+    """Get all daemon agent configurations."""
+    try:
+        from app.database import get_daemon_configs
+        return get_daemon_configs()
+    except Exception as e:
+        return {"error": str(e)}
+
+
+@router.get("/api/daemon/config/{agent_name}")
+def get_daemon_config(agent_name: str):
+    """Get a single daemon agent configuration."""
+    try:
+        from app.database import get_daemon_config
+        cfg = get_daemon_config(agent_name)
+        if not cfg:
+            raise HTTPException(status_code=404, detail=f"Agent '{agent_name}' not found")
+        return cfg
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/api/daemon/config/{agent_name}")
+def save_daemon_config(agent_name: str, request: dict):
+    """Save/set a single daemon agent configuration."""
+    try:
+        from app.database import save_daemon_config
+        save_daemon_config(agent_name, request)
+        return {"success": True}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/api/daemon/config/reset")
+def reset_daemon_configs():
+    """Reset all daemon configurations to defaults."""
+    try:
+        from app.database import reset_daemon_configs
+        reset_daemon_configs()
+        return {"success": True}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ---------------------------------------------------------------------------
 # Email Deliverability
 # ---------------------------------------------------------------------------
 
@@ -1098,14 +1162,15 @@ def add_geo_target(request: dict):
         from app.database import db_conn
         with db_conn() as conn:
             cur = conn.execute(
-                """INSERT INTO geo_targets (country, state, city, target_type, scheduled_day, scheduled_time)
-                   VALUES (?, ?, ?, ?, ?, ?)""",
+                """INSERT INTO geo_targets (country, state, city, target_type, scheduled_day, scheduled_date, scheduled_time)
+                   VALUES (?, ?, ?, ?, ?, ?, ?)""",
                 (
                     request.get("country", "United States"),
                     request.get("state", ""),
                     request.get("city", ""),
                     request.get("target_type", "scout"),
                     request.get("scheduled_day", ""),
+                    request.get("scheduled_date", ""),
                     request.get("scheduled_time", ""),
                 ),
             )
@@ -1541,6 +1606,89 @@ def lead_scout_search_geo(request: dict):
 # ---------------------------------------------------------------------------
 # Leads — differentiated listing
 # ---------------------------------------------------------------------------
+
+@router.get("/api/leads/export-by-date")
+def export_leads_by_date(from_date: str = "", to_date: str = ""):
+    """Export leads filtered by date range as CSV."""
+    try:
+        from app.database import db_conn
+        with db_conn() as conn:
+            query = "SELECT * FROM leads WHERE 1=1"
+            params = []
+            if from_date:
+                from_ts = 0
+                try:
+                    from datetime import datetime
+                    from_ts = datetime.strptime(from_date, "%Y-%m-%d").timestamp()
+                except Exception:
+                    pass
+                if from_ts:
+                    query += " AND created_at >= ?"
+                    params.append(from_ts)
+            if to_date:
+                to_ts = 0
+                try:
+                    from datetime import datetime, timedelta
+                    to_ts = datetime.strptime(to_date, "%Y-%m-%d").timestamp() + 86400
+                except Exception:
+                    pass
+                if to_ts:
+                    query += " AND created_at < ?"
+                    params.append(to_ts)
+            query += " ORDER BY created_at DESC"
+            rows = conn.execute(query, params).fetchall()
+            leads = [dict(r) for r in rows]
+
+        output = io.StringIO()
+        keys = ["business_name", "owner_name", "business_email", "phone", "website",
+                "address", "niche", "category", "services_offered", "score", "status",
+                "lead_type", "source", "linkedin_url"]
+        writer = csv.DictWriter(output, fieldnames=keys, extrasaction="ignore")
+        writer.writeheader()
+        writer.writerows(leads)
+
+        return StreamingResponse(
+            io.BytesIO(output.getvalue().encode("utf-8")),
+            media_type="text/csv",
+            headers={"Content-Disposition": f"attachment; filename=leads_{from_date}_{to_date}.csv"},
+        )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/api/leads/export-by-type")
+def export_leads_by_type(lead_type: str = ""):
+    """Export leads filtered by type as CSV."""
+    try:
+        from app.database import db_conn
+        with db_conn() as conn:
+            if lead_type:
+                rows = conn.execute(
+                    "SELECT * FROM leads WHERE lead_type = ? ORDER BY created_at DESC",
+                    (lead_type,),
+                ).fetchall()
+            else:
+                rows = conn.execute(
+                    "SELECT * FROM leads ORDER BY created_at DESC"
+                ).fetchall()
+            leads = [dict(r) for r in rows]
+
+        output = io.StringIO()
+        keys = ["business_name", "owner_name", "business_email", "phone", "website",
+                "address", "niche", "category", "services_offered", "score", "status",
+                "lead_type", "source", "linkedin_url"]
+        writer = csv.DictWriter(output, fieldnames=keys, extrasaction="ignore")
+        writer.writeheader()
+        writer.writerows(leads)
+
+        return StreamingResponse(
+            io.BytesIO(output.getvalue().encode("utf-8")),
+            media_type="text/csv",
+            headers={"Content-Disposition": f"attachment; filename={lead_type or 'all'}_leads.csv"},
+        )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
 
 @router.get("/api/leads/by-type")
 def leads_by_type():
