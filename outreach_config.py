@@ -16,6 +16,8 @@ outreach_agent.py and the GUI configuration panel.
 
 import json
 import os
+import base64
+import hashlib
 import logging
 from dataclasses import dataclass, asdict, field
 
@@ -101,21 +103,55 @@ class SmtpProfile:
     is_default: bool = False
 
 
+def _get_fernet():
+    """Get a Fernet instance keyed to this deployment."""
+    from cryptography.fernet import Fernet
+    key = os.getenv("SMTP_ENCRYPTION_KEY", "")
+    if not key:
+        seed = os.getenv("SMTP_PASSWORD", "deus-default-seed")
+        key = base64.urlsafe_b64encode(hashlib.sha256(seed.encode()).digest())
+    return Fernet(key)
+
+
+def _encrypt_pw(plain: str) -> str:
+    if not plain:
+        return ""
+    return _get_fernet().encrypt(plain.encode()).decode()
+
+
+def _decrypt_pw(cipher: str) -> str:
+    if not cipher:
+        return ""
+    try:
+        return _get_fernet().decrypt(cipher.encode()).decode()
+    except Exception:
+        return ""
+
+
 def load_smtp_profiles() -> list[SmtpProfile]:
     if not os.path.exists(SMTP_PROFILES_FILE):
         return []
     try:
         with open(SMTP_PROFILES_FILE, "r") as f:
             data = json.load(f)
-        return [SmtpProfile(**p) for p in data]
+        result = []
+        for p in data:
+            p["smtp_password"] = _decrypt_pw(p.get("smtp_password", ""))
+            result.append(SmtpProfile(**p))
+        return result
     except Exception as e:
         logger.warning("Failed to load %s (%s).", SMTP_PROFILES_FILE, e)
         return []
 
 
 def save_smtp_profiles(profiles: list[SmtpProfile]) -> None:
+    encrypted = []
+    for p in profiles:
+        d = asdict(p)
+        d["smtp_password"] = _encrypt_pw(d["smtp_password"])
+        encrypted.append(d)
     with open(SMTP_PROFILES_FILE, "w") as f:
-        json.dump([asdict(p) for p in profiles], f, indent=2)
+        json.dump(encrypted, f, indent=2)
 
 
 def upsert_smtp_profile(profile: SmtpProfile) -> list[SmtpProfile]:
