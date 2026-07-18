@@ -655,10 +655,10 @@ class DeusDaemon:
                 llm = LLM()
                 agent = LeadScoutAgent(None, None, llm)
                 cfg_json = config.get("config_json", {})
-                niche = cfg_json.get("niche", "").strip()
                 for target in due:
                     t = dict(target)
                     try:
+                        niche = t.get("niche", "").strip() or cfg_json.get("niche", "").strip()
                         location_parts = [p for p in [t.get("city"), t.get("state"), t.get("country")] if p]
                         query = f"{niche} in {', '.join(location_parts)}" if niche else ", ".join(location_parts)
                         if not query:

@@ -167,7 +167,7 @@ tr:hover td{background:var(--panel2)}
         </div>
         <div style="margin-top:6px;font-size:11px;color:var(--muted)">Click state abbreviation to select. Set day (optional), specific date (optional), and time. Daemon auto-runs scout for each scheduled state on its schedule.</div>
         <div class="tbl-wrap" style="margin-top:8px">
-          <table><thead><tr><th>State</th><th>Day</th><th>Date</th><th>Time</th><th>Status</th><th>Last Run</th><th></th></tr></thead><tbody id="geo-tbody"></tbody></table>
+          <table><thead><tr><th>State</th><th>Day</th><th>Date</th><th>Time</th><th>Niche</th><th>Status</th><th>Last Run</th><th></th></tr></thead><tbody id="geo-tbody"></tbody></table>
         </div>
       </div>
       <div class="section" id="geo-results-section" style="display:none">
@@ -712,6 +712,20 @@ No character limit." style="width:100%;font-family:Consolas,monospace;font-size:
         <div id="daemon-config-list"></div>
         <div class="row" style="margin-top:10px">
           <button class="btn-red" onclick="resetDaemonConfig()" style="padding:3px 10px;font-size:11px">Reset to Defaults</button>
+        </div>
+      </div>
+      <div class="section">
+        <h3>Schedules</h3>
+        <div style="font-size:12px;color:var(--muted);margin-bottom:10px">Agent schedules run on interval (minutes). Create schedules for LeadScout, Outreach, Followup, etc. Config JSON supports niche, target, and other agent params.</div>
+        <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px;align-items:flex-end">
+          <div class="field" style="flex:.5"><label>Name</label><input type="text" id="sched-name" placeholder="e.g. Scout HVAC"></div>
+          <div class="field" style="flex:.5"><label>Agent</label><select id="sched-agent"><option>LeadScoutAgent</option><option>OutreachAgent</option><option>FollowupAgent</option><option>DealCloserAgent</option><option>ReportAgent</option><option>SystemCheckerAgent</option></select></div>
+          <div class="field" style="flex:.2"><label>Interval (min)</label><input type="number" id="sched-interval" value="480" min="1"></div>
+          <div class="field" style="flex:.5"><label>Config JSON (niche, target, etc.)</label><input type="text" id="sched-config" value='{"niche":"","target":50}' placeholder='{"niche":"HVAC","target":50}'></div>
+          <button onclick="createSchedule()" class="btn-green" style="align-self:flex-end">+ Add</button>
+        </div>
+        <div class="tbl-wrap">
+          <table><thead><tr><th>Name</th><th>Agent</th><th>Interval</th><th>Config</th><th>Status</th><th>Last Run</th><th>Next Run</th><th></th></tr></thead><tbody id="schedules-tbody"><tr><td colspan="8" style="color:var(--muted);text-align:center">Loading...</td></tr></tbody></table>
         </div>
       </div>
       <div class="section">
@@ -1735,6 +1749,8 @@ function loadDaemon() {
   });
   // Load agent configs
   loadDaemonConfigs();
+  // Load schedules
+  loadSchedules();
 }
 
 function loadDaemonConfigs() {
@@ -1840,6 +1856,78 @@ function daemonAction(action) {
     log('daemon-log', d.message||action+' performed', d.message?'ok':'err');
     setTimeout(loadDaemon, 500);
   });
+}
+
+// ========== SCHEDULES (AgentScheduler) ==========
+function loadSchedules() {
+  fetch(API+'/api/schedules').then(r=>r.json()).then(function(schedules) {
+    var html = '';
+    (schedules||[]).forEach(function(s) {
+      var configStr = typeof s.config === 'object' ? JSON.stringify(s.config) : (s.config||'');
+      var lastRun = s.last_run_at ? fmtDate(s.last_run_at) : '—';
+      var nextRun = s.next_run_at ? fmtDate(s.next_run_at) : '—';
+      var statusColor = s.enabled ? 'var(--green)' : 'var(--red)';
+      var statusLabel = s.enabled ? 'Active' : 'Paused';
+      html += '<tr>';
+      html += '<td style="color:'+(s.enabled?'var(--cyan)':'var(--muted)')+'">'+(s.name||'')+'</td>';
+      html += '<td style="font-size:11px;color:var(--muted)">'+(s.agent_name||'')+'</td>';
+      html += '<td>'+(s.interval_minutes||'')+'m</td>';
+      html += '<td style="font-size:11px;max-width:180px;overflow:hidden;text-overflow:ellipsis;color:var(--muted)">'+configStr+'</td>';
+      html += '<td><span class="pill '+(s.enabled?'pill-ok':'pill-off')+'" style="font-size:10px">'+statusLabel+'</span></td>';
+      html += '<td style="font-size:11px;color:var(--muted)">'+lastRun+'</td>';
+      html += '<td style="font-size:11px;color:var(--muted)">'+nextRun+'</td>';
+      html += '<td style="white-space:nowrap">';
+      html += '<button onclick="toggleSchedule('+s.schedule_id+')" class="btn-sm" style="padding:2px 6px;font-size:10px">'+(s.enabled?'Pause':'Resume')+'</button> ';
+      html += '<button onclick="runScheduleNow('+s.schedule_id+')" class="btn-sm btn-violet" style="padding:2px 6px;font-size:10px">▶</button> ';
+      html += '<button onclick="deleteSchedule('+s.schedule_id+')" class="btn-red" style="padding:2px 6px;font-size:10px">✕</button>';
+      html += '</td></tr>';
+    });
+    document.getElementById('schedules-tbody').innerHTML = html || '<tr><td colspan="8" style="color:var(--muted);text-align:center">No schedules — create one above</td></tr>';
+  }).catch(function(e) {
+    document.getElementById('schedules-tbody').innerHTML = '<tr><td colspan="8" style="color:var(--muted);text-align:center">Error: '+e.message+'</td></tr>';
+  });
+}
+
+function createSchedule() {
+  var name = document.getElementById('sched-name').value.trim();
+  var agent = document.getElementById('sched-agent').value;
+  var interval = parseInt(document.getElementById('sched-interval').value) || 60;
+  var configStr = document.getElementById('sched-config').value.trim();
+  var config = {};
+  try { config = JSON.parse(configStr); } catch(e) { config = {niche: configStr}; }
+  if (!name) { alert('Enter a schedule name'); return; }
+  fetch(API+'/api/schedules', {
+    method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({name:name, agent_name:agent, interval_minutes:interval, config:config})
+  }).then(r=>r.json()).then(function(d) {
+    if (d.success) {
+      document.getElementById('sched-name').value = '';
+      loadSchedules();
+    }
+  }).catch(function(e) { alert('Error: '+e.message); });
+}
+
+function deleteSchedule(id) {
+  if (!confirm('Delete this schedule?')) return;
+  fetch(API+'/api/schedules/'+id, {method:'DELETE'}).then(r=>r.json()).then(function(d) {
+    if (d.success) loadSchedules();
+  }).catch(function(e) { alert('Error: '+e.message); });
+}
+
+function toggleSchedule(id) {
+  fetch(API+'/api/schedules/'+id+'/toggle', {
+    method:'POST', headers:{'Content-Type':'application/json'},
+    body: '{}'
+  }).then(r=>r.json()).then(function(d) {
+    if (d.success) loadSchedules();
+  }).catch(function(e) { alert('Error: '+e.message); });
+}
+
+function runScheduleNow(id) {
+  fetch(API+'/api/schedules/'+id+'/run-now', {method:'POST'}).then(r=>r.json()).then(function(d) {
+    log('daemon-log', 'Schedule ran: '+(d.message||'OK'), d.success?'ok':'err');
+    setTimeout(loadSchedules, 1000);
+  }).catch(function(e) { log('daemon-log', 'Run error: '+e, 'err'); });
 }
 
 // ========== DELIVERABILITY ==========
@@ -1954,7 +2042,7 @@ function scheduleSelectedStates() {
     const name = STATE_NAMES[code] || code;
     fetch(API+'/api/geo/targets', {
       method:'POST', headers:{'Content-Type':'application/json'},
-      body: JSON.stringify({country:'United States', state:name, target_type:'scout', scheduled_day: day, scheduled_date: date, scheduled_time: time})
+      body: JSON.stringify({country:'United States', state:name, niche: document.getElementById('geo-niche').value.trim(), target_type:'scout', scheduled_day: day, scheduled_date: date, scheduled_time: time})
     }).then(r=>r.json()).then(d=>{
       completed++;
       if (completed === total) {
@@ -1973,9 +2061,10 @@ function loadGeo() {
       const dayCol = t.scheduled_day ? '<span style="color:var(--cyan)">'+t.scheduled_day+'</span>' : '<span style="color:var(--muted)">—</span>';
       const dateCol = t.scheduled_date ? '<span style="color:var(--amber)">'+t.scheduled_date+'</span>' : '<span style="color:var(--muted)">—</span>';
       const timeCol = t.scheduled_time ? t.scheduled_time : '—';
-      html += '<tr><td>'+(t.state||t.country||'')+'</td><td>'+dayCol+'</td><td>'+dateCol+'</td><td>'+timeCol+'</td><td><span class="pill '+(t.enabled?'pill-ok':'pill-off')+'">'+(t.enabled?'Active':'Paused')+'</span></td><td style="color:var(--muted);font-size:11px">'+(t.last_run_at ? fmtDate(t.last_run_at) : 'Never')+'</td><td><button onclick="deleteGeo('+t.id+')" class="btn-red" style="padding:2px 6px;font-size:10px">✕</button></td></tr>';
+      const nicheCol = t.niche ? '<span style="color:var(--cyan)">'+t.niche+'</span>' : '<span style="color:var(--muted)">—</span>';
+      html += '<tr><td>'+(t.state||t.country||'')+'</td><td>'+dayCol+'</td><td>'+dateCol+'</td><td>'+timeCol+'</td><td>'+nicheCol+'</td><td><span class="pill '+(t.enabled?'pill-ok':'pill-off')+'">'+(t.enabled?'Active':'Paused')+'</span></td><td style="color:var(--muted);font-size:11px">'+(t.last_run_at ? fmtDate(t.last_run_at) : 'Never')+'</td><td><button onclick="deleteGeo('+t.id+')" class="btn-red" style="padding:2px 6px;font-size:10px">✕</button></td></tr>';
     });
-    document.getElementById('geo-tbody').innerHTML = html || '<tr><td colspan="7" style="color:var(--muted);text-align:center">No scheduled states — click states above and schedule with day+time</td></tr>';
+    document.getElementById('geo-tbody').innerHTML = html || '<tr><td colspan="8" style="color:var(--muted);text-align:center">No scheduled states — click states above and schedule with day+time</td></tr>';
   });
 }
 

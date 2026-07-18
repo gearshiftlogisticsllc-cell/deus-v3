@@ -443,6 +443,85 @@ def reset_daemon_configs():
 
 
 # ---------------------------------------------------------------------------
+# Agent Schedules (scheduler.py)
+# ---------------------------------------------------------------------------
+
+@router.get("/api/schedules")
+def list_schedules():
+    try:
+        from scheduler import get_scheduler
+        sched = get_scheduler()
+        rows = sched.list_schedules()
+        result = []
+        for s in rows:
+            result.append({
+                "schedule_id": s.schedule_id,
+                "name": s.name,
+                "agent_name": s.agent_name,
+                "interval_minutes": s.interval_minutes,
+                "config": s.config,
+                "enabled": s.enabled,
+                "last_run_at": s.last_run_at,
+                "next_run_at": s.next_run_at,
+                "created_at": s.created_at,
+            })
+        return result
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/api/schedules")
+def create_schedule(payload: dict):
+    try:
+        from scheduler import get_scheduler
+        sched = get_scheduler()
+        sid = sched.create_schedule(
+            name=payload.get("name", ""),
+            agent_name=payload.get("agent_name", ""),
+            interval_minutes=int(payload.get("interval_minutes", 60)),
+            config=payload.get("config", {}),
+            enabled=payload.get("enabled", True),
+        )
+        return {"id": sid, "success": True}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.delete("/api/schedules/{schedule_id}")
+def delete_schedule(schedule_id: int):
+    try:
+        from scheduler import get_scheduler
+        sched = get_scheduler()
+        sched.delete_schedule(schedule_id)
+        return {"success": True}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/api/schedules/{schedule_id}/toggle")
+def toggle_schedule(schedule_id: int, payload: dict = {}):
+    try:
+        enabled = payload.get("enabled", True)
+        from scheduler import get_scheduler
+        sched = get_scheduler()
+        sched.toggle_schedule(schedule_id, enabled)
+        return {"success": True}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/api/schedules/{schedule_id}/run-now")
+def run_schedule_now(schedule_id: int):
+    try:
+        from scheduler import get_scheduler
+        sched = get_scheduler()
+        result = sched.run_schedule_now(schedule_id)
+        return result
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ---------------------------------------------------------------------------
 # Manual Send
 # ---------------------------------------------------------------------------
 

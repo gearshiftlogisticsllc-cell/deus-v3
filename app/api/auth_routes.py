@@ -62,6 +62,7 @@ class GeoTargetCreateRequest(BaseModel):
     country: str = "United States"
     state: str = ""
     city: str = ""
+    niche: str = ""
     target_type: str = "scout"
     scheduled_day: str = ""
     scheduled_date: str = ""
@@ -73,6 +74,7 @@ class GeoTargetUpdateRequest(BaseModel):
     country: Optional[str] = None
     state: Optional[str] = None
     city: Optional[str] = None
+    niche: Optional[str] = None
     target_type: Optional[str] = None
     enabled: Optional[int] = None
 
@@ -534,6 +536,7 @@ def add_geo_target(request: GeoTargetCreateRequest):
                 country=request.country,
                 state=request.state,
                 city=request.city,
+                niche=request.niche,
                 target_type=request.target_type,
                 scheduled_day=request.scheduled_day,
                 scheduled_date=request.scheduled_date,
@@ -548,11 +551,11 @@ def add_geo_target(request: GeoTargetCreateRequest):
             from app.database import db_conn
             with db_conn() as conn:
                 cur = conn.execute(
-                    """INSERT INTO geo_targets (country, state, city, target_type, scheduled_day, scheduled_date, scheduled_time)
-                       VALUES (?, ?, ?, ?, ?, ?, ?)""",
+                    """INSERT INTO geo_targets (country, state, city, niche, target_type, scheduled_day, scheduled_date, scheduled_time)
+                       VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
                     (
                         request.country, request.state, request.city,
-                        request.target_type, request.scheduled_day,
+                        request.niche, request.target_type, request.scheduled_day,
                         request.scheduled_date, request.scheduled_time,
                     ),
                 )
@@ -610,7 +613,7 @@ def update_geo_target(target_id: int, request: GeoTargetUpdateRequest):
             updates = []
             params = []
             data = request.model_dump(exclude_unset=True)
-            for key in ("scheduled_day", "scheduled_time", "country", "state", "city", "target_type", "enabled"):
+            for key in ("scheduled_day", "scheduled_time", "scheduled_date", "niche", "country", "state", "city", "target_type", "enabled"):
                 if key in data and data[key] is not None:
                     updates.append(f"{key} = ?")
                     params.append(data[key])
@@ -658,7 +661,7 @@ def geo_targets_auto_scout(payload: dict = {}):
                     sources.append(direct)
                 llm = LLM()
                 agent = LeadScoutAgent(None, None, llm)
-                niche = req_data.get("niche", "")
+                niche = t.get("niche", "").strip() or req_data.get("niche", "").strip()
                 location_parts = [p for p in [t.get("city"), t.get("state"), t.get("country")] if p]
                 query = f"{niche} in {', '.join(location_parts)}" if niche else ", ".join(location_parts)
                 res = agent.run(user_input=query, target=req_data.get("target", 50))

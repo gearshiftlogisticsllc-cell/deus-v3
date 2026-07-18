@@ -9,6 +9,7 @@ class GeoTarget(Base):
     country = Column(String, nullable=False)
     state = Column(String, default="")
     city = Column(String, default="")
+    niche = Column(String, default="")
     scheduled_day = Column(String, default="")
     scheduled_time = Column(String, default="")
     scheduled_date = Column(String, default="")

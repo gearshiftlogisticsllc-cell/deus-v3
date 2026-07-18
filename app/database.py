@@ -330,8 +330,10 @@ def _init_db_sqlite():
                 country TEXT NOT NULL,
                 state TEXT NOT NULL DEFAULT '',
                 city TEXT NOT NULL DEFAULT '',
+                niche TEXT DEFAULT '',
                 scheduled_day TEXT DEFAULT '',
                 scheduled_time TEXT DEFAULT '',
+                scheduled_date TEXT DEFAULT '',
                 target_type TEXT DEFAULT 'scout',
                 enabled INTEGER DEFAULT 1,
                 created_at REAL DEFAULT (strftime('%s','now'))
@@ -447,7 +449,8 @@ def _init_db_sqlite():
         for col, typedef in [
             ("scheduled_day", "TEXT DEFAULT ''"),
             ("scheduled_time", "TEXT DEFAULT ''"),
-            ("scheduled_date", "TEXT DEFAULT ''"),  # specific date YYYY-MM-DD (in addition to day-of-week)
+            ("scheduled_date", "TEXT DEFAULT ''"),
+            ("niche", "TEXT DEFAULT ''"),
         ]:
             try:
                 conn.execute(f"ALTER TABLE geo_targets ADD COLUMN {col} {typedef}")
