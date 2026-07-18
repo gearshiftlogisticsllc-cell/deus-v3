@@ -113,8 +113,8 @@ def login(request: LoginRequest, response: Response):
             role = user["role"]
         except HTTPException:
             raise
-        except Exception as e:
-            raise HTTPException(status_code=500, detail=f"Login failed: {e}")
+        except Exception:
+            raise HTTPException(status_code=500, detail="Login failed")
 
     is_https = request.url.scheme == "https"
     response.set_cookie(
@@ -189,7 +189,7 @@ def submit_pending_change(request: Request, payload: PendingSubmitRequest):
             )
             return {"success": True, "change_id": change_id}
         except Exception as e:
-            raise HTTPException(status_code=500, detail=str(e))
+            raise HTTPException(status_code=500, detail="Internal error")
 
 
 @router.get("/api/pending")
@@ -215,7 +215,7 @@ def list_pending(request: Request):
             from app.database import get_pending_changes
             return get_pending_changes("pending")
         except Exception as e:
-            raise HTTPException(status_code=500, detail=str(e))
+            raise HTTPException(status_code=500, detail="Internal error")
 
 
 @router.post("/api/pending/{change_id}/review")
@@ -242,7 +242,7 @@ def review_change(request: Request, change_id: int, payload: ReviewRequest):
             review_pending_change(change_id, user["user_id"], payload.approved)
             return {"success": True, "approved": payload.approved}
         except Exception as e:
-            raise HTTPException(status_code=500, detail=str(e))
+            raise HTTPException(status_code=500, detail="Internal error")
 
 
 # ===========================================================================
@@ -275,7 +275,7 @@ async def upload_rules(request: Request, file: UploadFile = File(...)):
             rule_id = save_pdf_rules(file.filename, text, user["user_id"])
             return {"success": True, "rule_id": rule_id, "filename": file.filename}
         except Exception as e:
-            raise HTTPException(status_code=500, detail=str(e))
+            raise HTTPException(status_code=500, detail="Internal error")
 
 
 @router.get("/api/rules/active")
@@ -299,7 +299,7 @@ def get_rules():
             rules = get_active_pdf_rules()
             return rules or {"message": "No rules uploaded yet"}
         except Exception as e:
-            raise HTTPException(status_code=500, detail=str(e))
+            raise HTTPException(status_code=500, detail="Internal error")
 
 
 # ===========================================================================
@@ -330,7 +330,7 @@ def list_custom_pipelines():
             from app.database import get_custom_pipelines
             return get_custom_pipelines()
         except Exception as e:
-            raise HTTPException(status_code=500, detail=str(e))
+            raise HTTPException(status_code=500, detail="Internal error")
 
 
 @router.post("/api/pipelines/custom")
@@ -344,7 +344,7 @@ def create_pipeline(request: Request, payload: PipelineCreateRequest):
             )
             return {"success": True, "pending": True, "change_id": change_id}
         except Exception as e:
-            raise HTTPException(status_code=500, detail=str(e))
+            raise HTTPException(status_code=500, detail="Internal error")
 
     try:
         from app.db import SessionLocal
@@ -369,7 +369,7 @@ def create_pipeline(request: Request, payload: PipelineCreateRequest):
             )
             return {"success": True, "pipeline_id": pipe_id}
         except Exception as e:
-            raise HTTPException(status_code=500, detail=str(e))
+            raise HTTPException(status_code=500, detail="Internal error")
 
 
 @router.delete("/api/pipelines/custom/{pipeline_id}")
@@ -394,7 +394,7 @@ def remove_pipeline(request: Request, pipeline_id: int):
             delete_custom_pipeline(pipeline_id)
             return {"success": True}
         except Exception as e:
-            raise HTTPException(status_code=500, detail=str(e))
+            raise HTTPException(status_code=500, detail="Internal error")
 
 
 # ===========================================================================
@@ -441,7 +441,7 @@ def all_pending(request: Request):
                     ).fetchall()
                 return [dict(r) for r in rows]
         except Exception as e:
-            raise HTTPException(status_code=500, detail=str(e))
+            raise HTTPException(status_code=500, detail="Internal error")
 
 
 @router.post("/api/pending/{change_id}/approve")
@@ -468,7 +468,7 @@ def approve_change(request: Request, change_id: int):
             review_pending_change(change_id, user["user_id"], True)
             return {"success": True}
         except Exception as e:
-            raise HTTPException(status_code=500, detail=str(e))
+            raise HTTPException(status_code=500, detail="Internal error")
 
 
 @router.post("/api/pending/{change_id}/reject")
@@ -495,7 +495,7 @@ def reject_change(request: Request, change_id: int):
             review_pending_change(change_id, user["user_id"], False)
             return {"success": True}
         except Exception as e:
-            raise HTTPException(status_code=500, detail=str(e))
+            raise HTTPException(status_code=500, detail="Internal error")
 
 
 # ===========================================================================
@@ -524,7 +524,7 @@ def list_geo_targets():
                 ).fetchall()
                 return [dict(r) for r in rows]
         except Exception as e:
-            raise HTTPException(status_code=500, detail=str(e))
+            raise HTTPException(status_code=500, detail="Internal error")
 
 
 @router.post("/api/geo/targets")
@@ -563,7 +563,7 @@ def add_geo_target(request: GeoTargetCreateRequest):
                 )
                 return {"id": cur.lastrowid}
         except Exception as e:
-            raise HTTPException(status_code=500, detail=str(e))
+            raise HTTPException(status_code=500, detail="Internal error")
 
 
 @router.delete("/api/geo/targets/{target_id}")
@@ -588,7 +588,7 @@ def delete_geo_target(target_id: int):
                 conn.execute("DELETE FROM geo_targets WHERE id = ?", (target_id,))
                 return {"deleted": True}
         except Exception as e:
-            raise HTTPException(status_code=500, detail=str(e))
+            raise HTTPException(status_code=500, detail="Internal error")
 
 
 @router.put("/api/geo/targets/{target_id}")
@@ -612,10 +612,11 @@ def update_geo_target(target_id: int, request: GeoTargetUpdateRequest):
     except Exception:
         try:
             from app.database import db_conn
+            ALLOWED_COLS = {"scheduled_day", "scheduled_time", "scheduled_date", "niche", "country", "state", "city", "target_type", "enabled"}
             updates = []
             params = []
             data = request.model_dump(exclude_unset=True)
-            for key in ("scheduled_day", "scheduled_time", "scheduled_date", "niche", "country", "state", "city", "target_type", "enabled"):
+            for key in ALLOWED_COLS:
                 if key in data and data[key] is not None:
                     updates.append(f"{key} = ?")
                     params.append(data[key])
@@ -631,7 +632,7 @@ def update_geo_target(target_id: int, request: GeoTargetUpdateRequest):
         except HTTPException:
             raise
         except Exception as e:
-            raise HTTPException(status_code=500, detail=str(e))
+            raise HTTPException(status_code=500, detail="Internal error")
 
 
 @router.post("/api/geo/targets/auto-scout")
@@ -684,4 +685,4 @@ def geo_targets_auto_scout(payload: dict = {}):
                 results.append({"target_id": t["id"], "error": str(e)})
         return {"success": True, "targets_due": len(due), "results": results}
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal error")

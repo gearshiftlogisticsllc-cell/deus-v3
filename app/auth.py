@@ -38,3 +38,8 @@ def require_admin(request: Request) -> dict:
     if user["role"] != "admin":
         raise HTTPException(status_code=403, detail="Admin access required")
     return user
+
+
+def safe_error(msg: str = "Internal server error") -> HTTPException:
+    """Return a generic error — never leak internal details to the client."""
+    return HTTPException(status_code=500, detail=msg)

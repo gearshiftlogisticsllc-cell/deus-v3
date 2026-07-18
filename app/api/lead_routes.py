@@ -123,7 +123,7 @@ def get_agent(name: str):
             healthy=h.healthy, health_status=h.status, health_message=h.message,
         )
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal error")
 
 
 @router.post("/api/agents/{name}/run", response_model=AgentRunResponse)
@@ -564,7 +564,7 @@ def export_leads_by_date(from_date: str = "", to_date: str = ""):
             headers={"Content-Disposition": f"attachment; filename=leads_{from_date}_{to_date}.csv"},
         )
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal error")
 
 
 @router.get("/api/leads/export-by-type")
@@ -595,7 +595,7 @@ def export_leads_by_type(lead_type: str = ""):
             headers={"Content-Disposition": f"attachment; filename={lead_type or 'all'}_leads.csv"},
         )
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal error")
 
 
 @router.get("/api/leads/by-type")
@@ -681,7 +681,7 @@ def save_outreach_config(cfg: dict):
         save_style_config(s)
         return {"saved": True}
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal error")
 
 
 @router.post("/api/outreach/preview")
@@ -801,7 +801,7 @@ def save_smtp_profile(profile: dict):
         ))
         return {"saved": True}
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal error")
 
 
 @router.delete("/api/smtp/profiles/{name}")
@@ -811,7 +811,7 @@ def delete_smtp_profile(name: str):
         del_fn(name)
         return {"deleted": True}
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal error")
 
 
 # ===========================================================================
@@ -858,7 +858,7 @@ def verify_email(request: dict):
         v = EmailVerifier(check_smtp=request.get("check_smtp", False))
         return v.verify(email)
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal error")
 
 
 @router.post("/api/email/check-spam")
@@ -871,7 +871,7 @@ def check_spam(request: dict):
             body=request.get("body", ""),
         )
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal error")
 
 
 @router.get("/api/send-limits/status")
@@ -1178,7 +1178,7 @@ def add_campaign_calendar(request: dict):
             )
             return {"id": cur.lastrowid}
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal error")
 
 
 @router.get("/api/followup/calendar/due")

@@ -70,7 +70,7 @@ def add_linkedin_queue_entry(request: dict):
             entry_id = add_to_linkedin_queue(request, request.get("message_template", ""))
             return {"success": bool(entry_id), "id": entry_id}
         except Exception as e:
-            raise HTTPException(status_code=500, detail=str(e))
+            raise HTTPException(status_code=500, detail="Internal error")
 
 
 @router.put("/api/linkedin/queue/{entry_id}")
@@ -93,7 +93,7 @@ def update_linkedin_entry(entry_id: int, request: dict):
             update_linkedin_queue(entry_id, request)
             return {"success": True}
         except Exception as e:
-            raise HTTPException(status_code=500, detail=str(e))
+            raise HTTPException(status_code=500, detail="Internal error")
 
 
 @router.delete("/api/linkedin/queue/{entry_id}")
@@ -116,7 +116,7 @@ def delete_linkedin_entry(entry_id: int):
             legacy_delete(entry_id)
             return {"success": True}
         except Exception as e:
-            raise HTTPException(status_code=500, detail=str(e))
+            raise HTTPException(status_code=500, detail="Internal error")
 
 
 @router.post("/api/linkedin/queue/bulk-delete")
@@ -142,7 +142,7 @@ def bulk_delete_linkedin(request: dict):
                 legacy_delete(eid)
             return {"deleted": len(ids)}
         except Exception as e:
-            raise HTTPException(status_code=500, detail=str(e))
+            raise HTTPException(status_code=500, detail="Internal error")
 
 
 @router.get("/api/linkedin/export")
@@ -156,7 +156,7 @@ def export_linkedin_csv(status: str = None):
             headers={"Content-Disposition": "attachment; filename=linkedin_queue.csv"},
         )
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal error")
 
 
 @router.post("/api/linkedin/queue/bulk-add")
@@ -253,7 +253,7 @@ def bulk_add_to_linkedin(request: dict):
 
             return {"success": True, "added": added}
         except Exception as e:
-            raise HTTPException(status_code=500, detail=str(e))
+            raise HTTPException(status_code=500, detail="Internal error")
 
 
 # ---------------------------------------------------------------------------
@@ -276,7 +276,7 @@ def daemon_start():
         get_daemon().start()
         return {"success": True, "message": "Daemon started"}
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal error")
 
 
 @router.post("/api/daemon/start-auto")
@@ -287,7 +287,7 @@ def daemon_start_auto(request: dict = None):
         get_daemon().start(auto_stop_hours=hours)
         return {"success": True, "message": f"Daemon started — will auto-stop in {hours} hours"}
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal error")
 
 
 @router.post("/api/daemon/stop")
@@ -297,7 +297,7 @@ def daemon_stop():
         get_daemon().stop()
         return {"success": True, "message": "Daemon stopped"}
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal error")
 
 
 @router.post("/api/daemon/restart")
@@ -308,7 +308,7 @@ def daemon_restart(request: dict = None):
         get_daemon().restart(interval_seconds=interval)
         return {"success": True, "message": "Daemon restarted"}
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal error")
 
 
 @router.get("/api/daemon/log")
@@ -384,7 +384,7 @@ def list_schedules():
             })
         return result
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal error")
 
 
 @router.post("/api/schedules")
@@ -401,7 +401,7 @@ def create_schedule(payload: dict):
         )
         return {"id": sid, "success": True}
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal error")
 
 
 @router.delete("/api/schedules/{schedule_id}")
@@ -412,7 +412,7 @@ def delete_schedule(schedule_id: int):
         sched.delete_schedule(schedule_id)
         return {"success": True}
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal error")
 
 
 @router.post("/api/schedules/{schedule_id}/toggle")
@@ -424,7 +424,7 @@ def toggle_schedule(schedule_id: int, payload: dict = {}):
         sched.toggle_schedule(schedule_id, enabled)
         return {"success": True}
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal error")
 
 
 @router.post("/api/schedules/{schedule_id}/run-now")
@@ -435,7 +435,7 @@ def run_schedule_now(schedule_id: int):
         result = sched.run_schedule_now(schedule_id)
         return result
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal error")
 
 
 # ---------------------------------------------------------------------------

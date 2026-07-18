@@ -138,7 +138,7 @@ def get_agent(name: str):
             health_message=h.message,
         )
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal error")
 
 
 @router.post("/api/agents/{name}/run", response_model=AgentRunResponse)
@@ -326,7 +326,7 @@ def save_outreach_config(cfg: dict):
         save_style_config(s)
         return {"saved": True}
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal error")
 
 
 @router.get("/api/smtp/profiles")
@@ -355,7 +355,7 @@ def save_smtp_profile(profile: dict):
         ))
         return {"saved": True}
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal error")
 
 
 @router.delete("/api/smtp/profiles/{name}")
@@ -365,7 +365,7 @@ def delete_smtp_profile(name: str):
         del_fn(name)
         return {"deleted": True}
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal error")
 
 
 _scout_jobs: dict = {}
@@ -1009,7 +1009,7 @@ def daemon_start():
         d.start()
         return {"success": True, "message": "Daemon started"}
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal error")
 
 
 @router.post("/api/daemon/start-auto")
@@ -1022,7 +1022,7 @@ def daemon_start_auto(request: dict = None):
         d.start(auto_stop_hours=hours)
         return {"success": True, "message": f"Daemon started — will auto-stop in {hours} hours"}
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal error")
 
 
 @router.post("/api/daemon/stop")
@@ -1033,7 +1033,7 @@ def daemon_stop():
         d.stop()
         return {"success": True, "message": "Daemon stopped"}
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal error")
 
 
 @router.post("/api/daemon/restart")
@@ -1045,7 +1045,7 @@ def daemon_restart(request: dict = None):
         d.restart(interval_seconds=interval)
         return {"success": True, "message": "Daemon restarted"}
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal error")
 
 
 @router.get("/api/daemon/log")
@@ -1084,7 +1084,7 @@ def get_daemon_config(agent_name: str):
     except HTTPException:
         raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal error")
 
 
 @router.post("/api/daemon/config/{agent_name}")
@@ -1095,7 +1095,7 @@ def save_daemon_config(agent_name: str, request: dict):
         save_daemon_config(agent_name, request)
         return {"success": True}
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal error")
 
 
 @router.post("/api/daemon/config/reset")
@@ -1106,7 +1106,7 @@ def reset_daemon_configs():
         reset_daemon_configs()
         return {"success": True}
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal error")
 
 
 # ---------------------------------------------------------------------------
@@ -1139,7 +1139,7 @@ def add_to_linkedin_queue(request: dict):
         entry_id = db_add(request, request.get("message_template", ""))
         return {"success": bool(entry_id), "id": entry_id}
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal error")
 
 
 @router.put("/api/linkedin/queue/{entry_id}")
@@ -1150,7 +1150,7 @@ def update_linkedin_entry(entry_id: int, request: dict):
         update_linkedin_queue(entry_id, request)
         return {"success": True}
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal error")
 
 
 @router.delete("/api/linkedin/queue/{entry_id}")
@@ -1161,7 +1161,7 @@ def delete_linkedin_entry(entry_id: int):
         delete_linkedin_entry(entry_id)
         return {"success": True}
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal error")
 
 
 @router.post("/api/linkedin/queue/bulk-delete")
@@ -1176,7 +1176,7 @@ def bulk_delete_linkedin(request: dict):
             delete_linkedin_entry(eid)
         return {"deleted": len(ids)}
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal error")
 
 
 @router.get("/api/linkedin/export")
@@ -1191,7 +1191,7 @@ def export_linkedin_csv(status: str = None):
             headers={"Content-Disposition": f"attachment; filename=linkedin_queue.csv"},
         )
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal error")
 
 
 @router.post("/api/linkedin/queue/bulk-add")
@@ -1225,7 +1225,7 @@ def bulk_add_to_linkedin(request: dict):
 
         return {"success": True, "added": added}
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal error")
 
 
 # ---------------------------------------------------------------------------
@@ -1276,7 +1276,7 @@ def verify_email(request: dict):
         v = EmailVerifier(check_smtp=request.get("check_smtp", False))
         return v.verify(email)
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal error")
 
 
 @router.post("/api/email/check-spam")
@@ -1289,7 +1289,7 @@ def check_spam(request: dict):
             body=request.get("body", ""),
         )
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal error")
 
 
 # ---------------------------------------------------------------------------
@@ -1350,7 +1350,7 @@ def add_geo_target(request: dict):
             )
             return {"id": cur.lastrowid}
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal error")
 
 
 @router.delete("/api/geo/targets/{target_id}")
@@ -1361,7 +1361,7 @@ def delete_geo_target(target_id: int):
             conn.execute("DELETE FROM geo_targets WHERE id = ?", (target_id,))
             return {"deleted": True}
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal error")
 
 
 @router.put("/api/geo/targets/{target_id}")
@@ -1369,15 +1369,14 @@ def update_geo_target(target_id: int, request: dict):
     """Update scheduled_day and scheduled_time for a geo target."""
     try:
         from app.database import db_conn
+        ALLOWED = {"scheduled_day", "scheduled_time", "scheduled_date", "niche", "country", "state", "city", "target_type", "enabled"}
         with db_conn() as conn:
             updates = []
             params = []
-            if "scheduled_day" in request:
-                updates.append("scheduled_day = ?")
-                params.append(request["scheduled_day"])
-            if "scheduled_time" in request:
-                updates.append("scheduled_time = ?")
-                params.append(request["scheduled_time"])
+            for key in ALLOWED:
+                if key in request:
+                    updates.append(f"{key} = ?")
+                    params.append(request[key])
             if not updates:
                 raise HTTPException(status_code=400, detail="No fields to update")
             params.append(target_id)
@@ -1389,7 +1388,7 @@ def update_geo_target(target_id: int, request: dict):
     except HTTPException:
         raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal error")
 
 
 @router.post("/api/geo/targets/auto-scout")
@@ -1468,7 +1467,7 @@ def add_campaign_calendar(request: dict):
             )
             return {"id": cur.lastrowid}
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal error")
 
 
 @router.get("/api/followup/calendar")
@@ -1827,7 +1826,7 @@ def export_leads_by_date(from_date: str = "", to_date: str = ""):
             headers={"Content-Disposition": f"attachment; filename=leads_{from_date}_{to_date}.csv"},
         )
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal error")
 
 
 @router.get("/api/leads/export-by-type")
@@ -1861,7 +1860,7 @@ def export_leads_by_type(lead_type: str = ""):
             headers={"Content-Disposition": f"attachment; filename={lead_type or 'all'}_leads.csv"},
         )
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal error")
 
 
 @router.get("/api/leads/by-type")
