@@ -101,15 +101,15 @@ def _check_login_rate(ip: str):
 
 
 @router.post("/api/auth/login")
-def login(request: LoginRequest, response: Response):
-    client_ip = request.client.host if request.client else "unknown"
+def login(login_data: LoginRequest, response: Response, http_request: Request = None):
+    client_ip = http_request.client.host if http_request and http_request.client else "unknown"
     _check_login_rate(client_ip)
     try:
         from app.db import SessionLocal
         from app.repositories import UserRepository
         with SessionLocal() as session:
             repo = UserRepository(session)
-            user = repo.authenticate(request.username, request.password)
+            user = repo.authenticate(login_data.username, login_data.password)
             if not user:
                 raise HTTPException(status_code=401, detail="Invalid credentials")
             expires_at = time.time() + 86400
@@ -124,7 +124,7 @@ def login(request: LoginRequest, response: Response):
     except Exception:
         try:
             from app.database import authenticate_user, create_session
-            user = authenticate_user(request.username, request.password)
+            user = authenticate_user(login_data.username, login_data.password)
             if not user:
                 raise HTTPException(status_code=401, detail="Invalid credentials")
             token = create_session(user["id"])
@@ -135,7 +135,7 @@ def login(request: LoginRequest, response: Response):
         except Exception:
             raise HTTPException(status_code=500, detail="Login failed")
 
-    is_https = request.url.scheme == "https"
+    is_https = http_request.url.scheme == "https" if http_request else False
     response.set_cookie(
         key="deus_session", value=token,
         httponly=True, max_age=86400, samesite="lax",
