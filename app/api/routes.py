@@ -387,7 +387,6 @@ def lead_scout_search(request: dict):
         raise HTTPException(status_code=400, detail="niche is required")
 
     target = int(request.get("target", 50))
-    use_serper = request.get("use_serper", False)
     brightdata_key = request.get("brightdata_key", "")
 
     import threading, uuid
@@ -410,7 +409,7 @@ def lead_scout_search(request: dict):
             ) if brightdata_key else None
 
             serper_key = os.getenv("SERPER_API_KEY", "")
-            serper = SerperSource(serper_key) if (use_serper and serper_key) else None
+            serper = SerperSource(serper_key) if serper_key else None
 
             ddg = DuckDuckGoSource()
             direct = DirectWebSource()
@@ -1741,7 +1740,6 @@ def lead_scout_search_geo(request: dict):
     country = request.get("country", "")
     states = request.get("states", [])
     target = int(request.get("target", 50))
-    use_serper = request.get("use_serper", False)
 
     if not niche:
         raise HTTPException(status_code=400, detail="niche is required")
@@ -1757,7 +1755,7 @@ def lead_scout_search_geo(request: dict):
     try:
         from lead_scout_agent import LeadScoutAgent, LLM, SerperSource, DuckDuckGoSource, DirectWebSource
         serper_key = os.getenv("SERPER_API_KEY", "")
-        serper = SerperSource(serper_key) if (use_serper and serper_key) else None
+        serper = SerperSource(serper_key) if serper_key else None
         ddg = DuckDuckGoSource()
         direct = DirectWebSource()
         sources = []
