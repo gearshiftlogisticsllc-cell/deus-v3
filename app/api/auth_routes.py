@@ -660,7 +660,7 @@ def geo_targets_auto_scout(payload: dict = {}):
     try:
         from app.database import db_conn
         from datetime import datetime
-        from lead_scout_agent import LeadScoutAgent, LLM, DuckDuckGoSource, DirectWebSource
+        from lead_scout_agent import LeadScoutAgent, LLM, DuckDuckGoSource, DirectWebSource, SerperSource, SERPER_API_KEY
         today_name = datetime.now().strftime("%A")
         current_time = datetime.now().strftime("%H:%M")
         req_data = payload or {}
@@ -676,13 +676,14 @@ def geo_targets_auto_scout(payload: dict = {}):
             try:
                 ddg = DuckDuckGoSource()
                 direct = DirectWebSource()
+                serper = SerperSource(SERPER_API_KEY) if SERPER_API_KEY else None
                 sources = []
                 if ddg.enabled:
                     sources.append(ddg)
                 if direct.enabled:
                     sources.append(direct)
                 llm = LLM()
-                agent = LeadScoutAgent(None, None, llm)
+                agent = LeadScoutAgent(None, serper, llm)
                 niche = t.get("niche", "").strip() or req_data.get("niche", "").strip()
                 location_parts = [p for p in [t.get("city"), t.get("state"), t.get("country")] if p]
                 query = f"{niche} in {', '.join(location_parts)}" if niche else ", ".join(location_parts)

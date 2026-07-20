@@ -312,19 +312,15 @@ class DeusDaemon:
                     error_msg = f"Auto-outreach: {e}"
                     logger.error("Auto-outreach failed: %s", e)
 
-            # Task 7: Lead Scout rotation — one state per day at 12 PM, 400 leads
-            now = datetime.now()
-            if now.hour == 12 and now.minute < 10:
-                try:
-                    scout_result = self._run_lead_scout_rotation()
-                    leads_discovered = scout_result.get("discovered", 0)
-                except Exception as e:
-                    leads_discovered = 0
-                    errors += 1
-                    error_msg = f"Lead scout rotation: {e}"
-                    logger.error("Lead scout rotation failed: %s", e)
-            else:
+            # Task 7: Lead Scout rotation — one state per day, every cycle
+            try:
+                scout_result = self._run_lead_scout_rotation()
+                leads_discovered = scout_result.get("discovered", 0)
+            except Exception as e:
                 leads_discovered = 0
+                errors += 1
+                error_msg = f"Lead scout rotation: {e}"
+                logger.error("Lead scout rotation failed: %s", e)
 
             duration = time.time() - cycle_start
             self._status.last_cycle_at = time.time()
@@ -528,21 +524,38 @@ class DeusDaemon:
             return {"checked": 0}
 
     def _run_lead_scout_rotation(self) -> dict:
-        """Run lead scout rotation — one state per day at 12 PM, 400 leads.
-        Uses rotation DB table; reads niche from env or rotation defaults.
+        """Run lead scout rotation — one state per day.
+        Uses rotation DB table; reads niche from env, daemon_config, or PDF rules.
         """
         try:
             from app.database import (
                 ensure_lead_scout_rotation, get_next_scout_state,
                 update_scout_state, complete_scout_cycle,
-                is_state_completed_today, upsert_lead
+                is_state_completed_today, upsert_lead,
+                get_daemon_config, get_active_pdf_rules,
             )
-            from lead_scout_agent import LeadScoutAgent, LLM, DuckDuckGoSource, DirectWebSource
+            from lead_scout_agent import (
+                LeadScoutAgent, LLM, DuckDuckGoSource, DirectWebSource,
+                SerperSource, SERPER_API_KEY,
+            )
 
             niche = os.getenv("LEAD_SCOUT_NICHE", "").strip()
             target = int(os.getenv("LEAD_SCOUT_TARGET", "400"))
             if not niche:
-                logger.warning("LEAD_SCOUT_NICHE not set — skipping rotation")
+                cfg = get_daemon_config("lead_scout")
+                if cfg:
+                    cj = cfg.get("config_json", {})
+                    niche = cj.get("niche", "").strip()
+                    target = int(cj.get("target", target))
+            if not niche:
+                rules = get_active_pdf_rules()
+                if rules and rules.get("content"):
+                    lines = [l.strip() for l in rules["content"].split("\n") if l.strip()]
+                    if lines:
+                        niche = lines[0]
+
+            if not niche:
+                logger.warning("No niche found — skipping rotation (set LEAD_SCOUT_NICHE env, daemon_config, or upload rules PDF)")
                 return {"discovered": 0}
 
             ensure_lead_scout_rotation(target_per_state=target)
@@ -564,16 +577,14 @@ class DeusDaemon:
             remaining = state["target_per_state"] - current_collected
             batch_target = min(remaining, target)
 
-            logger.info("Rotation: state=%s collected=%d target=%d batch=%d",
-                        state_name, current_collected, state["target_per_state"], batch_target)
-
             ddg = DuckDuckGoSource()
             direct = DirectWebSource()
+            serper = SerperSource(SERPER_API_KEY) if SERPER_API_KEY else None
             sources = []
             if ddg.enabled: sources.append(ddg)
             if direct.enabled: sources.append(direct)
             llm = LLM()
-            agent = LeadScoutAgent(None, None, llm)
+            agent = LeadScoutAgent(None, serper, llm)
             query = f"{niche} in {state_name}"
             result = agent.run(user_input=query, target=batch_target)
 
@@ -623,15 +634,23 @@ class DeusDaemon:
             niche = cfg_json.get("niche", "").strip()
             location = cfg_json.get("location", "").strip()
             direct_count = int(config.get("max_per_run", 0) or 5)
+            if not niche:
+                from app.database import get_active_pdf_rules
+                rules = get_active_pdf_rules()
+                if rules and rules.get("content"):
+                    lines = [l.strip() for l in rules["content"].split("\n") if l.strip()]
+                    if lines:
+                        niche = lines[0]
             if niche:
-                from lead_scout_agent import LeadScoutAgent, LLM, DuckDuckGoSource, DirectWebSource
+                from lead_scout_agent import LeadScoutAgent, LLM, DuckDuckGoSource, DirectWebSource, SerperSource, SERPER_API_KEY
                 ddg = DuckDuckGoSource()
                 direct = DirectWebSource()
+                serper = SerperSource(SERPER_API_KEY) if SERPER_API_KEY else None
                 sources = []
                 if ddg.enabled: sources.append(ddg)
                 if direct.enabled: sources.append(direct)
                 llm = LLM()
-                agent = LeadScoutAgent(None, None, llm)
+                agent = LeadScoutAgent(None, serper, llm)
                 query = f"{niche} in {location}" if location else niche
                 result = agent.run(user_input=query, target=direct_count)
                 if result.success and result.data:
@@ -666,14 +685,15 @@ class DeusDaemon:
                     (current_time, today_name, today_date),
                 ).fetchall()
             if due:
-                from lead_scout_agent import LeadScoutAgent, LLM, DuckDuckGoSource, DirectWebSource
+                from lead_scout_agent import LeadScoutAgent, LLM, DuckDuckGoSource, DirectWebSource, SerperSource, SERPER_API_KEY
                 ddg = DuckDuckGoSource()
                 direct = DirectWebSource()
+                serper = SerperSource(SERPER_API_KEY) if SERPER_API_KEY else None
                 sources = []
                 if ddg.enabled: sources.append(ddg)
                 if direct.enabled: sources.append(direct)
                 llm = LLM()
-                agent = LeadScoutAgent(None, None, llm)
+                agent = LeadScoutAgent(None, serper, llm)
                 cfg_json = config.get("config_json", {})
                 for target in due:
                     t = dict(target)
@@ -709,13 +729,23 @@ class DeusDaemon:
             auto_rotation = cfg_json.get("auto_rotation", False)
             auto_niche = cfg_json.get("niche", "").strip()
             target_per_run = int(cfg_json.get("target", 400) or 400)
+            if not auto_niche:
+                from app.database import get_active_pdf_rules
+                rules = get_active_pdf_rules()
+                if rules and rules.get("content"):
+                    lines = [l.strip() for l in rules["content"].split("\n") if l.strip()]
+                    if lines:
+                        auto_niche = lines[0]
             if auto_rotation and auto_niche:
                 from app.database import (
                     ensure_lead_scout_rotation, get_next_scout_state,
                     update_scout_state, complete_scout_cycle,
                     is_state_completed_today, upsert_lead
                 )
-                from lead_scout_agent import LeadScoutAgent, LLM, DuckDuckGoSource, DirectWebSource
+                from lead_scout_agent import (
+                    LeadScoutAgent, LLM, DuckDuckGoSource, DirectWebSource,
+                    SerperSource, SERPER_API_KEY,
+                )
 
                 ensure_lead_scout_rotation(target_per_state=target_per_run)
 
@@ -741,11 +771,12 @@ class DeusDaemon:
 
                 ddg = DuckDuckGoSource()
                 direct = DirectWebSource()
+                serper = SerperSource(SERPER_API_KEY) if SERPER_API_KEY else None
                 sources = []
                 if ddg.enabled: sources.append(ddg)
                 if direct.enabled: sources.append(direct)
                 llm = LLM()
-                agent = LeadScoutAgent(None, None, llm)
+                agent = LeadScoutAgent(None, serper, llm)
                 query = f"{auto_niche} in {state_name}"
                 result = agent.run(user_input=query, target=batch_target)
                 if result.success and result.data:

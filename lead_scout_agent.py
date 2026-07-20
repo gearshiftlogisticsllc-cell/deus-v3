@@ -968,6 +968,18 @@ class LeadScoutAgent(BaseAgent):
             }
         return fallback
 
+    @staticmethod
+    def _load_niches_from_rules() -> List[str]:
+        try:
+            from app.database import get_active_pdf_rules
+            rules = get_active_pdf_rules()
+            if not rules or not rules.get("content"):
+                return []
+            lines = [l.strip() for l in rules["content"].split("\n") if l.strip()]
+            return lines
+        except Exception:
+            return []
+
     def generate_query_variants(self, query: str, location: str, context: str = "", want: int = 15) -> List[str]:
         """
         Google only returns a limited set of results per exact query string, so to
@@ -1235,6 +1247,11 @@ class LeadScoutAgent(BaseAgent):
         user_input = kwargs.get("user_input", "")
         target = kwargs.get("target", TARGET_LEADS)
 
+        if not user_input:
+            niches = self._load_niches_from_rules()
+            if niches:
+                user_input = niches[0]
+                logger.info("No niche given — using first from PDF rules: %s", user_input)
         if not user_input:
             return make_result(False, "No niche provided.",
                               data=[], stats={}, duration=time.time() - start)

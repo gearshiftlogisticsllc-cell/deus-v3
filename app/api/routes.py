@@ -374,6 +374,16 @@ _scout_jobs: dict = {}
 def lead_scout_search(request: dict):
     niche = request.get("niche", "").strip()
     if not niche:
+        try:
+            from app.database import get_active_pdf_rules
+            rules = get_active_pdf_rules()
+            if rules and rules.get("content"):
+                lines = [l.strip() for l in rules["content"].split("\n") if l.strip()]
+                if lines:
+                    niche = lines[0]
+        except Exception:
+            pass
+    if not niche:
         raise HTTPException(status_code=400, detail="niche is required")
 
     target = int(request.get("target", 50))
@@ -1411,14 +1421,15 @@ def geo_targets_auto_scout(request: dict = None):
         for target in due:
             t = dict(target)
             try:
-                from lead_scout_agent import LeadScoutAgent, LLM, DuckDuckGoSource, DirectWebSource
+                from lead_scout_agent import LeadScoutAgent, LLM, DuckDuckGoSource, DirectWebSource, SerperSource, SERPER_API_KEY
                 ddg = DuckDuckGoSource()
                 direct = DirectWebSource()
+                serper = SerperSource(SERPER_API_KEY) if SERPER_API_KEY else None
                 sources = []
                 if ddg.enabled: sources.append(ddg)
                 if direct.enabled: sources.append(direct)
                 llm = LLM()
-                agent = LeadScoutAgent(None, None, llm)
+                agent = LeadScoutAgent(None, serper, llm)
                 niche = request.get("niche", "") if request else ""
                 location_parts = [p for p in [t.get("city"), t.get("state"), t.get("country")] if p]
                 query = f"{niche} in {', '.join(location_parts)}" if niche else ", ".join(location_parts)
@@ -1717,6 +1728,16 @@ def track_email_delivery(request: dict):
 def lead_scout_search_geo(request: dict):
     """Search leads with geography targeting."""
     niche = request.get("niche", "").strip()
+    if not niche:
+        try:
+            from app.database import get_active_pdf_rules
+            rules = get_active_pdf_rules()
+            if rules and rules.get("content"):
+                lines = [l.strip() for l in rules["content"].split("\n") if l.strip()]
+                if lines:
+                    niche = lines[0]
+        except Exception:
+            pass
     country = request.get("country", "")
     states = request.get("states", [])
     target = int(request.get("target", 50))

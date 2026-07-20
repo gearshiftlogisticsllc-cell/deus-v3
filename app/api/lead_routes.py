@@ -1219,6 +1219,16 @@ def due_calendar_entries(campaign_id: int = None):
 def lead_scout_search(request: dict):
     niche = request.get("niche", "").strip()
     if not niche:
+        try:
+            from app.database import get_active_pdf_rules
+            rules = get_active_pdf_rules()
+            if rules and rules.get("content"):
+                lines = [l.strip() for l in rules["content"].split("\n") if l.strip()]
+                if lines:
+                    niche = lines[0]
+        except Exception:
+            pass
+    if not niche:
         raise HTTPException(status_code=400, detail="niche is required")
 
     target = int(request.get("target", 50))
@@ -1285,6 +1295,16 @@ def lead_scout_search(request: dict):
 @router.post("/api/lead-scout/search-geo")
 def lead_scout_search_geo(request: dict):
     niche = request.get("niche", "").strip()
+    if not niche:
+        try:
+            from app.database import get_active_pdf_rules
+            rules = get_active_pdf_rules()
+            if rules and rules.get("content"):
+                lines = [l.strip() for l in rules["content"].split("\n") if l.strip()]
+                if lines:
+                    niche = lines[0]
+        except Exception:
+            pass
     country = request.get("country", "")
     states = request.get("states", [])
     target = int(request.get("target", 50))
