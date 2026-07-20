@@ -547,15 +547,26 @@ class DeusDaemon:
                     cj = cfg.get("config_json", {})
                     niche = cj.get("niche", "").strip()
                     target = int(cj.get("target", target))
-            rules_lines = []
             if not niche:
-                rules = get_active_pdf_rules()
-                if rules and rules.get("content"):
-                    lines = [l.strip() for l in rules["content"].split("\n") if l.strip()]
-                    if lines:
-                        rules_lines = lines
+                ddg = DuckDuckGoSource()
+                direct = DirectWebSource()
+                serper = SerperSource(SERPER_API_KEY) if SERPER_API_KEY else None
+                llm = LLM()
+                agent = LeadScoutAgent(None, serper, llm)
+                extracted = agent._load_niches_from_rules()
+                if extracted:
+                    niche = extracted[0]
+                    logger.info("Using extracted niche from rules: %s", niche)
+                else:
+                    from app.database import get_active_pdf_rules
+                    rules = get_active_pdf_rules()
+                    if rules and rules.get("content"):
+                        lines = [l.strip() for l in rules["content"].split("\n") if l.strip() and len(l.strip()) > 10]
+                        if lines:
+                            niche = lines[0]
+                            logger.warning("Falling back to first rule line as niche: %s", niche)
 
-            if not niche and not rules_lines:
+            if not niche:
                 logger.warning("No niche found — skipping rotation (set LEAD_SCOUT_NICHE env, daemon_config, or upload rules PDF)")
                 return {"discovered": 0}
 
@@ -584,22 +595,12 @@ class DeusDaemon:
             llm = LLM()
             agent = LeadScoutAgent(None, serper, llm)
 
-            niches_to_search = [f"{n} in {state_name}" for n in rules_lines] if rules_lines else [f"{niche} in {state_name}"]
-            per_niche_target = max(5, batch_target // len(niches_to_search)) if len(niches_to_search) > 1 else batch_target
-
-            all_leads = []
-            for i, q in enumerate(niches_to_search):
-                logger.info("Rotation niche %d/%d: %s", i + 1, len(niches_to_search), q)
-                result = agent.run(user_input=q, target=per_niche_target)
-                if result.success and result.data:
-                    all_leads.extend(result.data)
-                    logger.info("  -> +%d leads (total %d)", len(result.data), len(all_leads))
-                if len(all_leads) >= batch_target:
-                    all_leads = all_leads[:batch_target]
-                    break
+            query = f"{niche} in {state_name}"
+            logger.info("Rotation query: %s | target=%d", query, batch_target)
+            result = agent.run(user_input=query, target=batch_target)
 
             from lead_scout_agent import _deduplicate
-            all_leads = _deduplicate(all_leads)
+            all_leads = _deduplicate(result.data) if result.success and result.data else []
 
             total_saved = 0
             if all_leads:

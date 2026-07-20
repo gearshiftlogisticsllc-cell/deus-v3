@@ -968,17 +968,49 @@ class LeadScoutAgent(BaseAgent):
             }
         return fallback
 
-    @staticmethod
-    def _load_niches_from_rules() -> List[str]:
+    def _load_niches_from_rules(self) -> List[str]:
         try:
             from app.database import get_active_pdf_rules
             rules = get_active_pdf_rules()
             if not rules or not rules.get("content"):
                 return []
-            lines = [l.strip() for l in rules["content"].split("\n") if l.strip()]
-            return lines
-        except Exception:
+            text = rules["content"].strip()
+            if not self.llm.available:
+                return []
+            result = self.llm.ask_json(
+                f'Below is a set of lead-generation rules. Extract 1-3 concise search queries '
+                f'that would find matching businesses. Return ONLY a JSON array of strings.\n\n'
+                f'Rules:\n{text[:3000]}'
+            )
+            if isinstance(result, list):
+                queries = [str(q).strip() for q in result if isinstance(q, str) and q.strip()]
+                if queries:
+                    logger.info("Extracted %d search queries from rules: %s", len(queries), queries)
+                    return queries
+            logger.warning("LLM could not extract queries from rules text, falling back to first line")
+            lines = [l.strip() for l in text.split("\n") if l.strip() and len(l.strip()) > 10]
+            return lines[:1] if lines else []
+        except Exception as e:
+            logger.warning("Failed to load niches from rules: %s", e)
             return []
+
+    @staticmethod
+    def _get_rules_context() -> str:
+        try:
+            from rules_engine import get_rules_context
+            ctx = get_rules_context()
+            if ctx:
+                return ctx
+        except Exception:
+            pass
+        try:
+            from app.database import get_active_pdf_rules
+            rules = get_active_pdf_rules()
+            if rules and rules.get("content"):
+                return rules["content"][:2000]
+        except Exception:
+            pass
+        return ""
 
     def generate_query_variants(self, query: str, location: str, context: str = "", want: int = 15) -> List[str]:
         """
@@ -1152,8 +1184,11 @@ class LeadScoutAgent(BaseAgent):
                 "snippet": (l.get("services_offered", "") or "")[:160],
             } for idx, l in enumerate(chunk)]
 
+            rules_ctx = self._get_rules_context()
+            rules_block = f'\nRules/Criteria to follow when scoring:\n{rules_ctx}\n' if rules_ctx else ''
             prompt = (
                 f'A user wants leads for: "{original_query}".\n'
+                f"{rules_block}"
                 f"For EACH lead below, judge fit and return a JSON array. Each element: "
                 f'{{"i": <index>, "score": <1-100>, "analysis": "<one short sentence>", '
                 f'"outreach_suggestion": "<one short opening line>"}}.\n'
