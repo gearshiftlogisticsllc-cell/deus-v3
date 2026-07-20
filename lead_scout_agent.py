@@ -1247,30 +1247,49 @@ class LeadScoutAgent(BaseAgent):
         user_input = kwargs.get("user_input", "")
         target = kwargs.get("target", TARGET_LEADS)
 
+        rules_niches = []
         if not user_input:
-            niches = self._load_niches_from_rules()
-            if niches:
-                user_input = niches[0]
-                logger.info("No niche given — using first from PDF rules: %s", user_input)
-        if not user_input:
+            rules_niches = self._load_niches_from_rules()
+            if rules_niches:
+                logger.info("No niche given — loaded %d niches from PDF rules", len(rules_niches))
+        if not user_input and not rules_niches:
             return make_result(False, "No niche provided.",
                               data=[], stats={}, duration=time.time() - start)
 
-        parsed = self.parse_niche(user_input)
-        query = parsed["query"]
-        location = parsed["location"]
-        context = parsed.get("context", "")
-        logger.info("Niche: %r | Location: %r | Context: %r | Target: %d", query, location, context, target)
+        niches_to_search = rules_niches if (not user_input and rules_niches) else [user_input]
 
-        leads = self.collect(query, location, context=context, target=target)
-        if not leads:
+        all_leads = []
+        for i, single_niche in enumerate(niches_to_search):
+            logger.info("Searching niche %d/%d: %s", i + 1, len(niches_to_search), single_niche)
+            parsed = self.parse_niche(single_niche)
+            query = parsed["query"]
+            location = parsed["location"]
+            context = parsed.get("context", "")
+            per_niche_target = max(5, target // len(niches_to_search)) if len(niches_to_search) > 1 else target
+            logger.info("  Query: %r | Location: %r | Context: %r | Target: %d",
+                        query, location, context, per_niche_target)
+
+            batch = self.collect(query, location, context=context, target=per_niche_target)
+            if batch:
+                all_leads.extend(batch)
+                logger.info("  -> +%d leads (total %d)", len(batch), len(all_leads))
+            else:
+                logger.info("  -> 0 leads for this niche")
+            if len(all_leads) >= target:
+                all_leads = all_leads[:target]
+                break
+
+        all_leads = _deduplicate(all_leads)
+        if not all_leads:
             return make_result(False, "No leads found. Check that at least one search source has a valid key.",
                               data=[], stats={}, duration=time.time() - start)
 
-        leads = self.email_enricher.enrich(leads)
-        leads = self.website_enricher.enrich(leads)
-        leads = self._llm_snippet_enrich(leads, user_input)
-        leads = self.score_batch(leads, user_input)
+        logger.info("Enriching %d leads...", len(all_leads))
+        all_leads = self.email_enricher.enrich(all_leads)
+        all_leads = self.website_enricher.enrich(all_leads)
+        all_leads = self._llm_snippet_enrich(all_leads, "; ".join(niches_to_search))
+        all_leads = self.score_batch(all_leads, "; ".join(niches_to_search))
+        leads = all_leads
 
         # Auto-push LinkedIn URLs to queue if requested
         if kwargs.get("push_linkedin", False):

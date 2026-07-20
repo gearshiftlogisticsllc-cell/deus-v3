@@ -134,8 +134,8 @@ tr:hover td{background:var(--panel2)}
             <input type="number" id="scout-target" value="50" min="10" max="400">
           </div>
           <div class="field" style="flex:.5">
-            <label>Use Serper</label>
-            <select id="scout-serper"><option value="0">No</option><option value="1">Yes</option></select>
+            <label>Batch Page</label>
+            <select id="scout-page-size"><option value="25">25</option><option value="50">50</option><option value="100">100</option></select>
           </div>
         </div>
         <div class="row">
@@ -187,6 +187,14 @@ tr:hover td{background:var(--panel2)}
           <table><thead><tr>
             <th>Score</th><th>Business</th><th>Owner</th><th>Phone</th><th>Email</th><th>Website</th><th>Location</th><th>Source</th>
           </tr></thead><tbody id="scout-tbody"></tbody></table>
+        </div>
+        <div id="scout-pagination" style="display:flex;align-items:center;gap:8px;margin-top:8px;flex-wrap:wrap">
+          <button onclick="scoutPrevPage()" id="scout-prev-btn" class="btn" disabled>‹ Prev</button>
+          <span id="scout-page-info" style="font-size:13px;color:var(--muted)">Page 1 of 1</span>
+          <button onclick="scoutNextPage()" id="scout-next-btn" class="btn" disabled>Next ›</button>
+          <span style="flex:1"></span>
+          <button onclick="downloadScoutPageCSV()" class="btn-green" style="font-size:12px">📥 Download Page CSV</button>
+          <button onclick="downloadScoutAllCSV()" class="btn" style="font-size:12px;background:var(--violet);color:var(--bg);border:none;padding:6px 12px;border-radius:5px;cursor:pointer">📥 Download All CSV</button>
         </div>
       </div>
       <div class="section"><h3>Activity Log</h3><div class="log" id="scout-log"></div></div>
@@ -996,18 +1004,18 @@ function pollScoutProgress(jobId) {
 
 function runScout() {
   const niche = document.getElementById('scout-niche').value.trim();
-  if (!niche) { alert('Enter a niche to search for'); return; }
   clearLog('scout-log');
-  log('scout-log', 'Starting lead scout for: '+niche, 'info');
+  log('scout-log', 'Starting lead scout for: '+(niche||'[rules from PDF]'), 'info');
   setBtn('scout-btn', true);
   document.getElementById('scout-status').innerHTML = '<span class="spinner"></span>';
 
+  const ps = parseInt(document.getElementById('scout-page-size').value)||25;
+  SCOUT_PAGE_SIZE = ps;
   fetch(API+'/api/lead-scout/search', {
     method: 'POST', headers: {'Content-Type':'application/json'},
     body: JSON.stringify({
       niche: niche,
       target: parseInt(document.getElementById('scout-target').value)||50,
-      use_serper: document.getElementById('scout-serper').value==='1',
       brightdata_key: document.getElementById('scout-bdkey').value.trim(),
     })
   }).then(r=>r.json()).then(d=>{
@@ -1025,15 +1033,72 @@ function runScout() {
   });
 }
 
+let scoutPage = 1;
+let SCOUT_PAGE_SIZE = 25;
+
 function renderScoutTable(leads) {
+  scoutResults = leads;
+  scoutPage = 1;
+  renderScoutPage();
+}
+
+function renderScoutPage() {
+  const leads = scoutResults || [];
+  const total = leads.length;
+  const totalPages = Math.max(1, Math.ceil(total / SCOUT_PAGE_SIZE));
+  if (scoutPage > totalPages) scoutPage = totalPages;
+  const start = (scoutPage - 1) * SCOUT_PAGE_SIZE;
+  const page = leads.slice(start, start + SCOUT_PAGE_SIZE);
+
   const tb = document.getElementById('scout-tbody');
   tb.innerHTML = '';
-  leads.forEach(l => {
+  page.forEach(l => {
     const st = l.status||'new';
     const stColor = st==='replied'?'var(--green)':st==='contacted'?'var(--cyan)':st==='send_failed'?'var(--red)':st==='no_response'?'var(--amber)':'var(--muted)';
     tb.innerHTML += '<tr><td>'+(l.score||'')+'</td><td>'+(l.business_name||'')+'</td><td>'+(l.owner_name||'')+'</td><td>'+(l.phone||'')+'</td><td>'+(l.business_email||'')+'</td><td>'+(l.website||'')+'</td><td>'+(l.location||'')+'</td><td><span style="color:'+stColor+'">'+st+'</span></td></tr>';
   });
-  document.getElementById('scout-count').textContent = leads.length+' leads';
+  document.getElementById('scout-count').textContent = total+' leads';
+  document.getElementById('scout-page-info').textContent = 'Page '+scoutPage+' of '+totalPages;
+  document.getElementById('scout-prev-btn').disabled = scoutPage <= 1;
+  document.getElementById('scout-next-btn').disabled = scoutPage >= totalPages;
+}
+
+function scoutPrevPage() {
+  if (scoutPage > 1) { scoutPage--; renderScoutPage(); }
+}
+
+function scoutNextPage() {
+  const totalPages = Math.max(1, Math.ceil((scoutResults||[]).length / SCOUT_PAGE_SIZE));
+  if (scoutPage < totalPages) { scoutPage++; renderScoutPage(); }
+}
+
+function downloadScoutPageCSV() {
+  const leads = scoutResults || [];
+  const start = (scoutPage - 1) * SCOUT_PAGE_SIZE;
+  const page = leads.slice(start, start + SCOUT_PAGE_SIZE);
+  if (!page.length) { log('scout-log', 'No leads on this page to export.', 'warn'); return; }
+  downloadCSV(page, 'leads_page_'+scoutPage+'.csv');
+}
+
+function downloadScoutAllCSV() {
+  const leads = scoutResults || [];
+  if (!leads.length) { log('scout-log', 'No leads to export.', 'warn'); return; }
+  downloadCSV(leads, 'leads_all.csv');
+}
+
+function downloadCSV(leads, filename) {
+  const fields = ['score','business_name','owner_name','phone','business_email','website','location','source','address','category','niche'];
+  const header = fields.join(',');
+  const rows = leads.map(l => fields.map(f => {
+    const v = l[f]||'';
+    return '"'+v.replace(/"/g,'""')+'"';
+  }).join(','));
+  const csv = header + '\n' + rows.join('\n');
+  const blob = new Blob(['\uFEFF'+csv], {type:'text/csv;charset=utf-8'});
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a'); a.href=url; a.download=filename; a.click();
+  URL.revokeObjectURL(url);
+  log('scout-log', 'Downloaded: '+filename, 'ok');
 }
 
 function exportLeadsCSV() {

@@ -547,14 +547,15 @@ class DeusDaemon:
                     cj = cfg.get("config_json", {})
                     niche = cj.get("niche", "").strip()
                     target = int(cj.get("target", target))
+            rules_lines = []
             if not niche:
                 rules = get_active_pdf_rules()
                 if rules and rules.get("content"):
                     lines = [l.strip() for l in rules["content"].split("\n") if l.strip()]
                     if lines:
-                        niche = lines[0]
+                        rules_lines = lines
 
-            if not niche:
+            if not niche and not rules_lines:
                 logger.warning("No niche found — skipping rotation (set LEAD_SCOUT_NICHE env, daemon_config, or upload rules PDF)")
                 return {"discovered": 0}
 
@@ -580,17 +581,29 @@ class DeusDaemon:
             ddg = DuckDuckGoSource()
             direct = DirectWebSource()
             serper = SerperSource(SERPER_API_KEY) if SERPER_API_KEY else None
-            sources = []
-            if ddg.enabled: sources.append(ddg)
-            if direct.enabled: sources.append(direct)
             llm = LLM()
             agent = LeadScoutAgent(None, serper, llm)
-            query = f"{niche} in {state_name}"
-            result = agent.run(user_input=query, target=batch_target)
+
+            niches_to_search = [f"{n} in {state_name}" for n in rules_lines] if rules_lines else [f"{niche} in {state_name}"]
+            per_niche_target = max(5, batch_target // len(niches_to_search)) if len(niches_to_search) > 1 else batch_target
+
+            all_leads = []
+            for i, q in enumerate(niches_to_search):
+                logger.info("Rotation niche %d/%d: %s", i + 1, len(niches_to_search), q)
+                result = agent.run(user_input=q, target=per_niche_target)
+                if result.success and result.data:
+                    all_leads.extend(result.data)
+                    logger.info("  -> +%d leads (total %d)", len(result.data), len(all_leads))
+                if len(all_leads) >= batch_target:
+                    all_leads = all_leads[:batch_target]
+                    break
+
+            from lead_scout_agent import _deduplicate
+            all_leads = _deduplicate(all_leads)
 
             total_saved = 0
-            if result.success and result.data:
-                for lead in result.data:
+            if all_leads:
+                for lead in all_leads:
                     lead["lead_type"] = "scraped"
                     lead["source"] = "daemon_rotation"
                     try:
