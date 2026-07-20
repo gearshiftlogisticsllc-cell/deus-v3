@@ -14,6 +14,7 @@ Uses google-genai (modern package), NOT google-generativeai (deprecated).
 import os
 import time
 import json
+import importlib
 import logging
 from dotenv import load_dotenv
 
@@ -220,10 +221,204 @@ Example: ["Question 1?", "Question 2?", "Question 3?", "Question 4?", "Question 
     ]
 
 
+# ===========================================================================
+# REPL — Interactive Brain CLI
+# ===========================================================================
+
+_AGENT_REGISTRY = {
+    "lead_scout": ("lead_scout_agent", "LeadScoutAgent"),
+    "outreach": ("outreach_agent", "OutreachAgent"),
+    "followup": ("followup_agent", "FollowupAgent"),
+    "appointment": ("appointment_agent", "AppointmentAgent"),
+    "deal_closer": ("deal_closer_agent", "DealCloserAgent"),
+    "report": ("report_agent", "ReportAgent"),
+    "system_checker": ("system_checker_agent", "SystemCheckerAgent"),
+}
+
+_INTENT_KEYWORDS = {
+    "lead_scout": ("scout", "find lead", "search lead", "discover", "find business",
+                   "hvac", "contractor", "generate lead"),
+    "outreach": ("outreach", "email", "contact", "send message", "reach out"),
+    "followup": ("follow", "followup", "re-engage", "reengage"),
+    "appointment": ("appointment", "calendly", "book", "schedule", "meeting"),
+    "deal_closer": ("deal", "close", "closer"),
+    "report": ("report", "summary", "stats", "statistics"),
+    "system_checker": ("check", "health", "system status"),
+}
+
+
+def _import_agent(module_name: str, class_name: str):
+    try:
+        mod = importlib.import_module(module_name)
+        return getattr(mod, class_name)
+    except Exception as e:
+        logger.debug("Failed to import %s.%s: %s", module_name, class_name, e)
+        return None
+
+
+def _detect_intent(text: str) -> str:
+    tl = text.lower()
+    for intent, keywords in _INTENT_KEYWORDS.items():
+        if any(k in tl for k in keywords):
+            return intent
+    return "general"
+
+
+def _execute_agent(intent: str, user_input: str) -> str:
+    if intent not in _AGENT_REGISTRY:
+        return f"No agent registered for '{intent}'."
+    mod_name, class_name = _AGENT_REGISTRY[intent]
+    cls = _import_agent(mod_name, class_name)
+    if cls is None:
+        return f"[{class_name}] Agent not available (import failed). Check dependencies."
+    try:
+        agent = cls()
+        result = agent.run(user_input=user_input)
+        if hasattr(result, "message"):
+            return result.message
+        if hasattr(result, "data") and result.data:
+            return f"Found {len(result.data)} leads."
+        return str(result)
+    except TypeError:
+        try:
+            agent = cls()
+            result = agent.run()
+            return str(result)
+        except Exception as e:
+            return f"[{class_name}] Error: {e}"
+    except Exception as e:
+        return f"[{class_name}] Error: {e}"
+
+
+SYSTEM_PROMPT = """You are Brain, the central AI assistant for the DEUS 3.0 system.
+You have access to the following agents that can be executed on demand:
+- lead_scout: Searches for business leads based on a niche/query
+- outreach: Sends email outreach to leads
+- followup: Sends follow-up emails
+- appointment: Manages appointments via Calendly
+- deal_closer: Generates closing messages
+- report: Generates reports
+- system_checker: Checks system health
+
+When the user asks you to DO something (find leads, send emails, check status, etc.),
+you should respond by executing the appropriate agent and reporting the result.
+When the user is just chatting, respond conversationally.
+
+Keep responses concise and helpful. You operate WITHOUT the daemon — 
+agents run immediately when you command them."""
+
+
+def repl():
+    """Interactive chat REPL."""
+    history = [{"role": "system", "content": SYSTEM_PROMPT}]
+
+    print()
+    print("=" * 55)
+    print("  Brain CLI  —  Chat with your AI")
+    print("=" * 55)
+    print("  Commands:  /help  /agents  /clear  /status  /quit")
+    print("  Just type naturally to chat or give commands.")
+    print("  Examples:")
+    print("    > find 50 HVAC leads in Texas")
+    print("    > what's the weather like?")
+    print("    > run system health check")
+    print("=" * 55)
+
+    while True:
+        try:
+            text = input("\nYou: ").strip()
+        except (EOFError, KeyboardInterrupt):
+            print()
+            break
+
+        if not text:
+            continue
+
+        if text.startswith("/"):
+            cmd = text[1:].lower().split()[0] if text[1:] else ""
+            if cmd in ("quit", "exit", "q"):
+                break
+            elif cmd in ("help", "?"):
+                print("\nBrain: Commands —")
+                print("  /help      Show this help")
+                print("  /agents    List available agents")
+                print("  /clear     Clear conversation history")
+                print("  /status    Show system configuration")
+                print("  /quit      Exit Brain CLI")
+                print("\n  Or just chat naturally. Brain will detect when to run an agent.")
+            elif cmd == "agents":
+                print("\nBrain: Available agents —")
+                for intent in _AGENT_REGISTRY:
+                    cls = _import_agent(*_AGENT_REGISTRY[intent])
+                    status = "Ready" if cls else "Unavailable"
+                    print(f"  {intent}: {status}")
+                print("  general: Chat/direct LLM response")
+            elif cmd == "clear":
+                history = [history[0]]
+                print("\nBrain: History cleared.")
+            elif cmd == "status":
+                print(f"\nBrain: System Status —")
+                print(f"  Groq: {'configured' if groq_client else 'NOT configured'}")
+                print(f"  Gemini: {'configured' if gemini_client else 'NOT configured'}")
+                print(f"  Rules PDF: {'loaded' if get_rules_context() else 'not loaded'}")
+            else:
+                print(f"\nBrain: Unknown command '{text}'. Try /help")
+            continue
+
+        intent = _detect_intent(text)
+        history.append({"role": "user", "content": text})
+
+        if intent != "general":
+            print(f"\nBrain: Running {intent}...")
+            result = _execute_agent(intent, text)
+            response = result
+        else:
+            # Chat with LLM using conversation history
+            messages = list(history)
+            try:
+                rules = get_rules_context()
+                if rules:
+                    messages.insert(1, {
+                        "role": "system",
+                        "content": f"Company rules context:\n{rules[:1500]}"
+                    })
+            except Exception:
+                pass
+
+            if groq_client:
+                try:
+                    response_obj = groq_client.chat.completions.create(
+                        model=GROQ_MODELS[0],
+                        messages=messages,
+                        max_tokens=2048,
+                    )
+                    response = response_obj.choices[0].message.content.strip()
+                except Exception as e:
+                    logger.warning("Groq chat failed, trying Gemini: %s", e)
+                    try:
+                        prompt = text
+                        for m in reversed(messages[:-1]):
+                            if m["role"] in ("user", "assistant"):
+                                prompt = m["content"] + "\n" + prompt
+                        response = ask_gemini(prompt)
+                    except Exception as e2:
+                        response = f"[Error: {e2}]"
+            elif gemini_client:
+                prompt = text
+                for m in reversed(messages[:-1]):
+                    if m["role"] in ("user", "assistant"):
+                        prompt = m["content"] + "\n" + prompt
+                response = ask_gemini(prompt)
+            else:
+                response = "[ERROR: No LLM configured. Set GROQ_API_KEY or GEMINI_API_KEY in .env]"
+
+        print(f"\nBrain: {response}")
+        history.append({"role": "assistant", "content": response})
+        if len(history) > 30:
+            history = [history[0]] + history[-28:]
+
+    print("Goodbye.")
+
+
 if __name__ == "__main__":
-    print(f"Groq: {'configured' if groq_client else 'NOT configured'}")
-    print(f"Gemini: {'configured' if gemini_client else 'NOT configured'}")
-    print(f"\nTesting Groq...")
-    print(ask_groq("Say 'brain.py works' in 5 words or less."))
-    print(f"\nTesting Gemini...")
-    print(ask_gemini("Say 'brain.py works' in 5 words or less."))
+    repl()
